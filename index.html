@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leitura de Códigos de Barras</title>
+    <style>
+        video {
+            width: 100%;
+            max-width: 500px;
+        }
+
+        #result {
+            margin-top: 20px;
+        }
+
+        button {
+            margin: 10px;
+            padding: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h2>Escaneie os Códigos</h2>
+    <video id="video" autoplay></video>
+    <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+    <button onclick="startScan('produto')">Escanear Produto</button>
+    <input type="number" id="quantidade" placeholder="Quantidade do lote">
+    <button onclick="showResults()">Mostrar Resultados</button>
+    <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
+    <div id="result"></div>
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script>
+        let notaFiscal = '';
+        let produto = '';
+        let quantidade = '';
+        const video = document.getElementById('video');
+        const resultDiv = document.getElementById('result');
+        const codeReader = new ZXing.BrowserBarcodeReader();
+
+        async function startScan(tipo) {
+            try {
+                const result = await codeReader.decodeFromVideoDevice(null, 'video', (result) => {
+                    if (result) {
+                        if (tipo === 'nota') {
+                            notaFiscal = result.text;
+                            alert('Nota Fiscal escaneada: ' + notaFiscal);
+                        } else {
+                            produto = result.text;
+                            alert('Produto escaneado: ' + produto);
+                        }
+                        codeReader.reset(); // Para o escaneamento após ler
+                    }
+                });
+            } catch (err) {
+                console.error('Erro ao escanear: ', err);
+                resultDiv.innerHTML = 'Erro ao escanear. Tente novamente.';
+            }
+        }
+
+        function showResults() {
+            quantidade = document.getElementById('quantidade').value;
+            if (notaFiscal && produto && quantidade) {
+                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+            } else {
+                resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
+            }
+        }
+
+        function sendWhatsApp() {
+            quantidade = document.getElementById('quantidade').value;
+            if (notaFiscal && produto && quantidade) {
+                const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
+                const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+                window.open(url, '_blank');
+            } else {
+                alert('Preencha todas as informações antes de enviar!');
+            }
+        }
+    </script>
+</body>
+</html>
