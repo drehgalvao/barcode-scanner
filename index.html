@@ -1,82 +1,186 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Leitura de Códigos de Barras</title>
-    <style>
-        video {
-            width: 100%;
-            max-width: 500px;
-        }
-
-        #result {
-            margin-top: 20px;
-        }
-
-        button {
-            margin: 10px;
-            padding: 10px;
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leitura de Códigos de Barras</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    video { width: 100%; max-width: 500px; border: 2px solid #333; }
+    canvas { display: none; }
+    #result { margin-top: 20px; font-size: 16px; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    input { padding: 10px; font-size: 16px; width: 150px; }
+    #scanArea { position: relative; display: inline-block; }
+    #focusRect { 
+      position: absolute; 
+      border: 2px dashed red; 
+      width: 80%; 
+      height: 150px; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%, -50%); 
+      display: none; 
+    }
+  </style>
 </head>
 <body>
-    <h2>Escaneie os Códigos</h2>
+  <h2>Escaneie os Códigos</h2>
+  <div id="scanArea">
     <video id="video" autoplay></video>
+    <div id="focusRect"></div>
+  </div>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <div style="margin-bottom:10px;">
     <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+    <button onclick="showManualInput('nota')">Digitar Nota Fiscal</button>
+    <input type="text" id="manualNota" placeholder="Digite a Nota Fiscal" style="display:none; margin-left:10px; width:200px;">
+  </div>
+  <div style="margin-bottom:10px;">
     <button onclick="startScan('produto')">Escanear Produto</button>
-    <input type="number" id="quantidade" placeholder="Quantidade do lote">
-    <button onclick="showResults()">Mostrar Resultados</button>
-    <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
-    <div id="result"></div>
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
-    <script>
-        let notaFiscal = '';
-        let produto = '';
-        let quantidade = '';
-        const video = document.getElementById('video');
-        const resultDiv = document.getElementById('result');
-        const codeReader = new ZXing.BrowserBarcodeReader();
+    <button onclick="showManualInput('produto')">Digitar Produto</button>
+    <input type="text" id="manualProduto" placeholder="Digite o Produto" style="display:none; margin-left:10px; width:200px;">
+  </div>
+  <input type="number" id="quantidade" placeholder="Quantidade do lote">
+  <button onclick="showResults()">Mostrar Resultados</button>
+  <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
+  <div id="result">Aguardando escaneamento...</div>
 
-        async function startScan(tipo) {
-            try {
-                const result = await codeReader.decodeFromVideoDevice(null, 'video', (result) => {
-                    if (result) {
-                        if (tipo === 'nota') {
-                            notaFiscal = result.text;
-                            alert('Nota Fiscal escaneada: ' + notaFiscal);
-                        } else {
-                            produto = result.text;
-                            alert('Produto escaneado: ' + produto);
-                        }
-                        codeReader.reset(); // Para o escaneamento após ler
-                    }
-                });
-            } catch (err) {
-                console.error('Erro ao escanear: ', err);
-                resultDiv.innerHTML = 'Erro ao escanear. Tente novamente.';
-            }
-        }
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+  <script>
+    let notaFiscal = '';
+    let produto = '';
+    let quantidade = '';
+    let manualMode = { nota: false, produto: false };
+    function showManualInput(tipo) {
+      if (tipo === 'nota') {
+        document.getElementById('manualNota').style.display = 'inline-block';
+        manualMode.nota = true;
+        stopVideo();
+        focusRect.style.display = 'none';
+      } else {
+        document.getElementById('manualProduto').style.display = 'inline-block';
+        manualMode.produto = true;
+        stopVideo();
+        focusRect.style.display = 'none';
+      }
+    }
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const resultDiv = document.getElementById('result');
+    const focusRect = document.getElementById('focusRect');
+    const codeReader = new ZXing.BrowserBarcodeReader({
+      barcodeFormats: [
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.UPC_E
+      ]
+    });
 
-        function showResults() {
-            quantidade = document.getElementById('quantidade').value;
-            if (notaFiscal && produto && quantidade) {
-                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+    async function startScan(tipo) {
+      if (tipo === 'nota') {
+        document.getElementById('manualNota').style.display = 'none';
+        manualMode.nota = false;
+      } else {
+        document.getElementById('manualProduto').style.display = 'none';
+        manualMode.produto = false;
+      }
+      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
+      focusRect.style.display = 'block';
+      try {
+        // Iniciar stream de vídeo
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream;
+        video.play();
+
+        // Configurar canvas para pré-processamento
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Loop para pré-processar e escanear
+        async function scanFrame() {
+          if (!video.srcObject) return; // Para o loop se o vídeo for parado
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          let src = cv.imread(canvas);
+          // Pré-processamento com OpenCV
+          let dst = new cv.Mat();
+          cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY); // Escala de cinza
+          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2); // Binarização
+          // Converter para imagem que o ZXing pode usar
+          cv.imshow(canvas, dst);
+          src.delete();
+          dst.delete();
+          try {
+            const result = await codeReader.decodeFromImage(canvas);
+            if (result) {
+              if (tipo === 'nota') {
+                notaFiscal = result.text;
+                resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+              } else {
+                produto = result.text;
+                resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+              }
+              stopVideo();
+              focusRect.style.display = 'none';
+              alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${result.text}`);
             } else {
-                resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
+              requestAnimationFrame(scanFrame); // Continua escaneando
             }
+          } catch (err) {
+            requestAnimationFrame(scanFrame); // Continua escaneando
+          }
         }
+        requestAnimationFrame(scanFrame);
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
+        console.error('Erro: ', err);
+        focusRect.style.display = 'none';
+      }
+    }
 
-        function sendWhatsApp() {
-            quantidade = document.getElementById('quantidade').value;
-            if (notaFiscal && produto && quantidade) {
-                const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
-                const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-                window.open(url, '_blank');
-            } else {
-                alert('Preencha todas as informações antes de enviar!');
-            }
-        }
-    </script>
+    function stopVideo() {
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+    }
+
+    function showResults() {
+      // Se estiver em modo manual, pegar valores dos inputs
+      if (manualMode.nota) {
+        notaFiscal = document.getElementById('manualNota').value;
+      }
+      if (manualMode.produto) {
+        produto = document.getElementById('manualProduto').value;
+      }
+      quantidade = document.getElementById('quantidade').value;
+      if (notaFiscal && produto && quantidade) {
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+      } else {
+        resultDiv.innerHTML = 'Escaneie ou digite ambos os códigos e informe a quantidade!';
+      }
+    }
+
+    function sendWhatsApp() {
+      if (manualMode.nota) {
+        notaFiscal = document.getElementById('manualNota').value;
+      }
+      if (manualMode.produto) {
+        produto = document.getElementById('manualProduto').value;
+      }
+      quantidade = document.getElementById('quantidade').value;
+      if (notaFiscal && produto && quantidade) {
+        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
+        const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+        window.open(url, '_blank');
+      } else {
+        alert('Preencha todas as informações antes de enviar!');
+      }
+    }
+  </script>
 </body>
 </html>
