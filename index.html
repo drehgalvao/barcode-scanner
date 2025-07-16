@@ -52,7 +52,7 @@
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
 
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
   <script src="https://docs.opencv.org/4.5.0/opencv.js"></script>
   <script>
     let notaFiscal = '';
@@ -63,6 +63,11 @@
     const flashBtn = document.getElementById('flashBtn');
     const cameraSelect = document.getElementById('cameraSelect');
     let selectedDeviceId = null;
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const resultDiv = document.getElementById('result');
+    const focusRect = document.getElementById('focusRect');
 
     function showManualInput(tipo) {
       if (tipo === 'nota') {
@@ -77,20 +82,6 @@
         focusRect.style.display = 'none';
       }
     }
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const resultDiv = document.getElementById('result');
-    const focusRect = document.getElementById('focusRect');
-    const codeReader = new ZXing.BrowserBarcodeReader({
-      barcodeFormats: [
-        ZXing.BarcodeFormat.CODE_128,
-        ZXing.BarcodeFormat.EAN_13,
-        ZXing.BarcodeFormat.EAN_8,
-        ZXing.BarcodeFormat.UPC_A,
-        ZXing.BarcodeFormat.UPC_E
-      ]
-    });
 
     async function startScan(tipo) {
       if (tipo === 'nota') {
@@ -104,13 +95,10 @@
       focusRect.style.display = 'block';
       // Listar câmeras disponíveis
       const devices = await navigator.mediaDevices.enumerateDevices();
-      // Filtrar apenas câmeras traseiras (label contém 'back' ou 'traseira', ignorando maiúsculas/minúsculas)
       const videoDevices = devices.filter(d => d.kind === 'videoinput' && (d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('traseira')));
-      // Se não encontrar nenhuma, usa todas como fallback
       const allVideoDevices = devices.filter(d => d.kind === 'videoinput');
       cameraSelect.innerHTML = '';
       if (videoDevices.length === 0) {
-        // fallback para todas se não encontrar traseira
         videoDevices.push(...allVideoDevices);
       }
       if (videoDevices.length > 1) {
@@ -131,95 +119,63 @@
         cameraSelect.style.display = 'none';
         selectedDeviceId = videoDevices[0]?.deviceId || null;
       }
-      try {
-        // Iniciar stream de vídeo
-        const constraints = { video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined } };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        video.play();
-        // Verifica suporte ao flash
-        streamTrack = stream.getVideoTracks()[0];
-        if (streamTrack && streamTrack.getCapabilities) {
-          const caps = streamTrack.getCapabilities();
-          if (caps.torch) {
-            flashBtn.style.display = 'inline-block';
-          } else {
-            flashBtn.style.display = 'none';
-          }
-        }
-        // Aguarda vídeo carregar para pegar dimensões corretas
-        await new Promise(resolve => {
-          video.onloadedmetadata = resolve;
-        });
-
-        // Configurar canvas para pré-processamento
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-
-        // Definir área de foco central
-        const focusW = Math.floor(canvas.width * 0.8);
-        const focusH = 150;
-        const focusX = Math.floor((canvas.width - focusW) / 2);
-        const focusY = Math.floor((canvas.height - focusH) / 2);
-
-        // Loop para pré-processar e escanear
-        async function scanFrame() {
-          if (!video.srcObject) return; // Para o loop se o vídeo for parado
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          // Captura apenas a área de foco
-          let frame = ctx.getImageData(focusX, focusY, focusW, focusH);
-          let tempCanvas = document.createElement('canvas');
-          tempCanvas.width = focusW;
-          tempCanvas.height = focusH;
-          let tempCtx = tempCanvas.getContext('2d');
-          tempCtx.putImageData(frame, 0, 0);
-
-          // OpenCV: pré-processamento
-          let src = cv.imread(tempCanvas);
-          let dst = new cv.Mat();
-          cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY); // Escala de cinza
-          // Aplica sharpening (nitidez)
-          let kernel = cv.Mat.ones(3, 3, cv.CV_32F);
-          kernel.data32F[4] = 9.0;
-          kernel.data32F[1] = kernel.data32F[3] = kernel.data32F[5] = kernel.data32F[7] = -1.0;
-          cv.filter2D(dst, dst, cv.CV_8U, kernel);
-          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
-
-          // Exibe área processada no canvas principal para debug
-          cv.imshow(canvas, dst);
-          src.delete();
-          dst.delete();
-          kernel.delete();
-
-          try {
-            const result = await codeReader.decodeFromImage(canvas);
-            if (result) {
-              if (tipo === 'nota') {
-                notaFiscal = result.text;
-                resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-              } else {
-                produto = result.text;
-                resultDiv.innerHTML = `Produto escaneado: ${produto}`;
-              }
-              stopVideo();
-              focusRect.style.display = 'none';
-              alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${result.text}`);
-            } else {
-              requestAnimationFrame(scanFrame); // Continua escaneando
-            }
-          } catch (err) {
-            requestAnimationFrame(scanFrame); // Continua escaneando
-          }
-        }
-        requestAnimationFrame(scanFrame);
-      } catch (err) {
-        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
-        console.error('Erro: ', err);
-        focusRect.style.display = 'none';
+      // Parar qualquer instância anterior do Quagga
+      if (window.Quagga && Quagga.initialized) {
+        Quagga.stop();
+        Quagga.initialized = false;
       }
+      // Configurar QuaggaJS
+      Quagga.init({
+        inputStream: {
+          name: 'Live',
+          type: 'LiveStream',
+          target: video,
+          constraints: {
+            deviceId: selectedDeviceId ? selectedDeviceId : undefined,
+            width: 640,
+            height: 480,
+            facingMode: 'environment'
+          },
+        },
+        locator: {
+          patchSize: 'medium',
+          halfSample: true
+        },
+        numOfWorkers: 2,
+        decoder: {
+          readers: ['code_128_reader','ean_reader','ean_8_reader','upc_reader','upc_e_reader']
+        },
+        locate: true
+      }, function(err) {
+        if (err) {
+          resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
+          focusRect.style.display = 'none';
+          return;
+        }
+        Quagga.initialized = true;
+        Quagga.start();
+      });
+      Quagga.onDetected(function(data) {
+        if (data && data.codeResult && data.codeResult.code) {
+          if (tipo === 'nota') {
+            notaFiscal = data.codeResult.code;
+            resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+          } else {
+            produto = data.codeResult.code;
+            resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+          }
+          stopVideo();
+          focusRect.style.display = 'none';
+          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${data.codeResult.code}`);
+        }
+      });
     }
 
     function stopVideo() {
+      if (window.Quagga && Quagga.initialized) {
+        Quagga.stop();
+        Quagga.initialized = false;
+      }
       if (video.srcObject) {
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
