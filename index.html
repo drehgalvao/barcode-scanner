@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -77,6 +78,7 @@
   <div id="result">Aguardando escaneamento...</div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
   <script>
     let notaFiscal = '';
     let produto = '';
@@ -85,6 +87,7 @@
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
     let barcodeDetector = null;
+    let extractedText = '';
 
     // Verifica suporte à Barcode Detection API
     window.addEventListener('load', () => {
@@ -103,7 +106,6 @@
       focusRect.style.display = 'block';
 
       try {
-        // Iniciar stream de vídeo com fallback para câmera frontal
         const constraints = {
           video: {
             facingMode: { ideal: 'environment' },
@@ -112,7 +114,6 @@
           }
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
-          // Fallback para câmera frontal se a traseira falhar
           return await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
           });
@@ -120,10 +121,13 @@
         video.srcObject = stream;
         video.play();
 
+        // Extrair texto com OCR
+        await extractTextFromVideo(tipo);
+
         if (barcodeDetector) {
-          scanWithBarcodeDetector(tipo);
+          await scanWithBarcodeDetector(tipo);
         } else {
-          scanWithQuagga(tipo);
+          await scanWithQuagga(tipo);
         }
       } catch (err) {
         resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
@@ -132,9 +136,49 @@
       }
     }
 
+    async function extractTextFromVideo(tipo) {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      let attempts = 0;
+      const maxAttempts = 50;
+
+      async function captureFrame() {
+        if (attempts >= maxAttempts) {
+          console.log('OCR: Máximo de tentativas atingido.');
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const result = await Tesseract.recognize(canvas.toDataURL(), 'por', {
+          logger: m => console.log(m)
+        });
+        extractedText = result.data.text.trim();
+        console.log('Texto extraído:', extractedText);
+
+        // Tentar identificar campos específicos (exemplo básico)
+        const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
+        for (let line of lines) {
+          if (line.includes('CNPJ') && !notaFiscal && tipo === 'nota') {
+            notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
+          } else if (line.includes('UN') && !quantidade && tipo === 'nota') {
+            quantidade = line.replace(/[^\d]/g, '');
+          } else if (line.includes('GATILHO') && !produto && tipo === 'produto') {
+            produto = line;
+          }
+        }
+
+        if (!notaFiscal || !produto || !quantidade) {
+          attempts++;
+          requestAnimationFrame(captureFrame);
+        }
+      }
+      requestAnimationFrame(captureFrame);
+    }
+
     async function scanWithBarcodeDetector(tipo) {
       let attempts = 0;
-      const maxAttempts = 100; // Limita tentativas para evitar loop infinito
+      const maxAttempts = 100;
       async function scanFrame() {
         if (attempts >= maxAttempts) {
           resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
@@ -146,12 +190,12 @@
           const barcodes = await barcodeDetector.detect(video);
           if (barcodes && barcodes.length > 0) {
             const code = barcodes[0].rawValue;
-            if (tipo === 'nota') {
+            if (tipo === 'nota' && !notaFiscal) {
               notaFiscal = code;
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            } else {
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
+            } else if (tipo === 'produto' && !produto) {
               produto = code;
-              resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
             }
             stopVideo();
             focusRect.style.display = 'none';
@@ -181,22 +225,16 @@
               height: { ideal: 720 }
             },
             area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
-            singleChannel: false // Usa cores para melhor precisão
+            singleChannel: false
           },
           decoder: {
             readers: [
-              'code_128_reader',
-              'ean_reader',
-              'ean_8_reader',
-              'upc_reader',
-              'upc_e_reader',
-              'code_39_reader',
-              'code_93_reader',
-              'codabar_reader'
+              'code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader',
+              'code_39_reader', 'code_93_reader', 'codabar_reader'
             ]
           },
           locator: { patchSize: 'medium', halfSample: true },
-          numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2), // Reduz workers
+          numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2),
           locate: true
         }, function(err) {
           if (err) {
@@ -212,12 +250,12 @@
         Quagga.onDetected(function(data) {
           if (data && data.codeResult && data.codeResult.code) {
             const code = data.codeResult.code;
-            if (tipo === 'nota') {
+            if (tipo === 'nota' && !notaFiscal) {
               notaFiscal = code;
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            } else {
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
+            } else if (tipo === 'produto' && !produto) {
               produto = code;
-              resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
             }
             Quagga.stop();
             focusRect.style.display = 'none';
@@ -242,18 +280,18 @@
     }
 
     function showResults() {
-      quantidade = document.getElementById('quantidade').value;
+      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
       if (notaFiscal && produto && quantidade) {
-        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}<br>Texto extraído: ${extractedText}`;
       } else {
         resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
       }
     }
 
     function sendWhatsApp() {
-      quantidade = document.getElementById('quantidade').value;
+      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
       if (notaFiscal && produto && quantidade) {
-        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
+        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}\nTexto extraído: ${extractedText}`;
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
