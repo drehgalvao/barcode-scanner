@@ -77,6 +77,10 @@
       max-width: 200px;
       margin-top: 10px;
     }
+    #photoPreview {
+      display: none;
+      margin-top: 10px;
+    }
   </style>
 </head>
 <body>
@@ -88,12 +92,14 @@
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
   <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
+  <button id="takePhoto" style="display:none;" onclick="takeProductPhoto()">Tirar Foto</button>
   <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
   <button id="saveLote" style="display:none;" onclick="saveLote()">Salvar Quantidade</button>
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
   <div id="productList"></div>
+  <div id="photoPreview"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
@@ -106,9 +112,11 @@
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
     const addProductBtn = document.getElementById('addProduct');
+    const takePhotoBtn = document.getElementById('takePhoto');
     const loteQuantityInput = document.getElementById('loteQuantity');
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
+    const photoPreviewDiv = document.getElementById('photoPreview');
     let barcodeDetector = null;
     let extractedText = '';
 
@@ -172,11 +180,11 @@
         extractedText = result.data.text.trim();
         console.log('Texto extraído:', extractedText);
 
-        // Capturar imagem
+        // Capturar imagem da nota automaticamente
         if (tipo === 'nota' && !notaFiscalImage) {
           notaFiscalImage = canvas.toDataURL('image/jpeg');
-        } else if (tipo === 'produto' && !currentProduct?.image) {
-          currentProduct = { image: canvas.toDataURL('image/jpeg'), code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+        } else if (tipo === 'produto' && !currentProduct) {
+          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
         }
 
         // Extrair campos específicos
@@ -214,7 +222,7 @@
           stopVideo();
           focusRect.style.display = 'none';
           if (tipo === 'produto') {
-            showLoteInput();
+            takePhotoBtn.style.display = 'inline';
           }
           return;
         }
@@ -232,7 +240,7 @@
             stopVideo();
             focusRect.style.display = 'none';
             if (tipo === 'produto') {
-              showLoteInput();
+              takePhotoBtn.style.display = 'inline';
             } else {
               addProductBtn.style.display = 'inline-block';
             }
@@ -290,7 +298,7 @@
             Quagga.stop();
             focusRect.style.display = 'none';
             if (tipo === 'produto') {
-              showLoteInput();
+              takePhotoBtn.style.display = 'inline';
             } else {
               addProductBtn.style.display = 'inline-block';
             }
@@ -314,6 +322,19 @@
       }
     }
 
+    function takeProductPhoto() {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      currentProduct.image = canvas.toDataURL('image/jpeg');
+      photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
+      photoPreviewDiv.style.display = 'block';
+      takePhotoBtn.style.display = 'none';
+      showLoteInput();
+    }
+
     function showLoteInput() {
       loteQuantityInput.style.display = 'inline';
       saveLoteBtn.style.display = 'inline';
@@ -322,18 +343,19 @@
 
     function saveLote() {
       const quantity = loteQuantityInput.value;
-      if (quantity && currentProduct) {
+      if (quantity && currentProduct && currentProduct.image) {
         currentProduct.lotes.push(parseInt(quantity));
         products.push({ ...currentProduct });
         resultDiv.innerHTML = `Lote salvo para ${currentProduct.code}. Quantidade: ${quantity}`;
         loteQuantityInput.style.display = 'none';
         saveLoteBtn.style.display = 'none';
+        photoPreviewDiv.style.display = 'none';
         currentProduct = null;
         extractedText = '';
         updateProductList();
         addProductBtn.style.display = 'inline-block';
       } else {
-        alert('Digite uma quantidade válida!');
+        alert('Tire uma foto e digite uma quantidade válida!');
       }
     }
 
