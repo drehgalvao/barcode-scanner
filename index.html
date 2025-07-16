@@ -90,9 +90,12 @@
     <div id="focusRect"></div>
   </div>
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+  <button id="newNote" style="display:none;" onclick="newNote()">Nova Nota</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
   <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
   <button id="takePhoto" style="display:none;" onclick="takeProductPhoto()">Tirar Foto</button>
+  <button id="confirmPhoto" style="display:none;" onclick="confirmProductPhoto()">Confirmar</button>
+  <button id="retakePhoto" style="display:none;" onclick="retakeProductPhoto()">Tirar Outra Foto</button>
   <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
   <button id="saveLote" style="display:none;" onclick="saveLote()">Salvar Quantidade</button>
   <button onclick="showResults()">Mostrar Resultados</button>
@@ -112,7 +115,10 @@
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
     const addProductBtn = document.getElementById('addProduct');
+    const newNoteBtn = document.getElementById('newNote');
     const takePhotoBtn = document.getElementById('takePhoto');
+    const confirmPhotoBtn = document.getElementById('confirmPhoto');
+    const retakePhotoBtn = document.getElementById('retakePhoto');
     const loteQuantityInput = document.getElementById('loteQuantity');
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
@@ -137,11 +143,16 @@
 
       try {
         const constraints = {
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: { 
+            facingMode: { ideal: 'environment' }, 
+            width: { ideal: 1280 }, 
+            height: { ideal: 720 },
+            focusMode: 'continuous' // Melhora o foco automático
+          }
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
           return await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
           });
         });
         video.srcObject = stream;
@@ -172,6 +183,7 @@
           resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
           stopVideo();
           focusRect.style.display = 'none';
+          newNoteBtn.style.display = 'inline-block';
           return;
         }
         try {
@@ -190,6 +202,7 @@
             }
             stopVideo();
             focusRect.style.display = 'none';
+            newNoteBtn.style.display = 'inline-block';
             addProductBtn.style.display = 'inline-block';
             console.log(`Código detectado (${tipo}):`, code);
             alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
@@ -213,7 +226,7 @@
             name: 'Live',
             type: 'LiveStream',
             target: video,
-            constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } },
+            constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' },
             area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
             singleChannel: false
           },
@@ -249,6 +262,7 @@
             }
             Quagga.stop();
             focusRect.style.display = 'none';
+            newNoteBtn.style.display = 'inline-block';
             addProductBtn.style.display = 'inline-block';
             console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
             alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
@@ -271,16 +285,38 @@
       }
     }
 
+    function newNote() {
+      notaFiscal = '';
+      notaFiscalImage = '';
+      products = [];
+      resultDiv.innerHTML = 'Nova nota iniciada. Escaneie a Nota Fiscal novamente.';
+      productListDiv.innerHTML = '';
+      newNoteBtn.style.display = 'none';
+      addProductBtn.style.display = 'none';
+    }
+
     async function takeProductPhoto() {
       const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const rectWidth = video.offsetWidth * 0.9; // 90% da largura do video
+      const rectHeight = 250; // Altura do retângulo vermelho
+      const rectX = (video.videoWidth - rectWidth) / 2;
+      const rectY = (video.videoHeight - rectHeight) / 2;
+      canvas.width = rectWidth;
+      canvas.height = rectHeight;
       const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, rectX, rectY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
       currentProduct.image = canvas.toDataURL('image/jpeg');
       photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
       photoPreviewDiv.style.display = 'block';
       takePhotoBtn.style.display = 'none';
+      confirmPhotoBtn.style.display = 'inline';
+      retakePhotoBtn.style.display = 'inline';
+    }
+
+    async function confirmProductPhoto() {
+      photoPreviewDiv.style.display = 'block';
+      confirmPhotoBtn.style.display = 'none';
+      retakePhotoBtn.style.display = 'none';
 
       // Extração de informações da foto
       const result = await Tesseract.recognize(currentProduct.image, 'por', { logger: m => console.log(m) });
@@ -304,6 +340,14 @@
       showLoteInput();
     }
 
+    function retakeProductPhoto() {
+      photoPreviewDiv.style.display = 'none';
+      confirmPhotoBtn.style.display = 'none';
+      retakePhotoBtn.style.display = 'none';
+      takePhotoBtn.style.display = 'inline';
+      currentProduct.image = '';
+    }
+
     function showLoteInput() {
       loteQuantityInput.style.display = 'inline';
       saveLoteBtn.style.display = 'inline';
@@ -323,7 +367,7 @@
         updateProductList();
         addProductBtn.style.display = 'inline-block';
       } else {
-        alert('Tire uma foto e digite uma quantidade válida!');
+        alert('Confirme a foto e digite uma quantidade válida!');
       }
     }
 
