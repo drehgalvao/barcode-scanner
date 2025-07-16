@@ -5,208 +5,252 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Leitura de Códigos de Barras</title>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; }
-    video { width: 100%; max-width: 500px; border: 2px solid #333; }
-    canvas { display: none; }
-    #result { margin-top: 20px; font-size: 16px; }
-    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    input { padding: 10px; font-size: 16px; width: 150px; }
-    #scanArea { position: relative; display: inline-block; }
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 10px;
+      background-color: #f0f0f0;
+    }
+    #scanArea {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+      max-width: 600px;
+    }
+    video {
+      width: 100%;
+      max-width: 600px;
+      border: 3px solid #333;
+      border-radius: 8px;
+    }
     #focusRect {
       position: absolute;
-      border: 3px solid #d00;
-      background: rgba(255,0,0,0.08);
-      width: 80%;
-      height: 150px;
+      border: 3px dashed #ff0000;
+      width: 90%;
+      height: 250px;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
       display: none;
-      box-shadow: 0 0 10px 2px #d00;
-      z-index: 2;
+      pointer-events: none;
+    }
+    #result {
+      margin: 20px 0;
+      font-size: 18px;
+      color: #333;
+    }
+    button {
+      margin: 10px;
+      padding: 12px 24px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    input {
+      padding: 10px;
+      font-size: 16px;
+      width: 150px;
+      margin: 10px;
+      border: 2px solid #333;
+      border-radius: 5px;
     }
   </style>
 </head>
 <body>
   <h2>Escaneie os Códigos</h2>
   <div id="scanArea">
-    <video id="video" autoplay></video>
+    <video id="video" autoplay muted playsinline></video>
     <div id="focusRect"></div>
-    <div style="color:#d00; font-weight:bold; margin-top:5px;">Alinhe o código de barras dentro do retângulo vermelho para melhor leitura.</div>
-    <button id="flashBtn" style="display:none; margin-top:10px;">Ligar Flash</button>
-    <select id="cameraSelect" style="display:none; margin-top:10px;"></select>
   </div>
-  <canvas id="canvas" style="display:none;"></canvas>
-  <div style="margin-bottom:10px;">
-    <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
-    <button onclick="showManualInput('nota')">Digitar Nota Fiscal</button>
-    <input type="text" id="manualNota" placeholder="Digite a Nota Fiscal" style="display:none; margin-left:10px; width:200px;">
-  </div>
-  <div style="margin-bottom:10px;">
-    <button onclick="startScan('produto')">Escanear Produto</button>
-    <button onclick="showManualInput('produto')">Digitar Produto</button>
-    <input type="text" id="manualProduto" placeholder="Digite o Produto" style="display:none; margin-left:10px; width:200px;">
-  </div>
-  <input type="number" id="quantidade" placeholder="Quantidade do lote">
+  <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+  <button onclick="startScan('produto')">Escanear Produto</button>
+  <input type="number" id="quantidade" placeholder="Quantidade do lote" min="1">
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
 
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/quagga/0.12.1/quagga.min.js"></script>
-  <script src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script>
     let notaFiscal = '';
     let produto = '';
     let quantidade = '';
-    let manualMode = { nota: false, produto: false };
-    let streamTrack = null;
-    const flashBtn = document.getElementById('flashBtn');
-    const cameraSelect = document.getElementById('cameraSelect');
-    let selectedDeviceId = null;
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
+    let barcodeDetector = null;
 
-    function showManualInput(tipo) {
-      if (tipo === 'nota') {
-        document.getElementById('manualNota').style.display = 'inline-block';
-        manualMode.nota = true;
-        stopVideo();
-        focusRect.style.display = 'none';
+    // Verifica suporte à Barcode Detection API
+    window.addEventListener('load', () => {
+      if ('BarcodeDetector' in window) {
+        barcodeDetector = new BarcodeDetector({
+          formats: ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_39', 'code_93', 'codabar']
+        });
+        resultDiv.innerHTML = 'Usando Barcode Detection API (nativa).';
       } else {
-        document.getElementById('manualProduto').style.display = 'inline-block';
-        manualMode.produto = true;
-        stopVideo();
+        resultDiv.innerHTML = 'Barcode Detection API não suportada. Usando QuaggaJS.';
+      }
+    });
+
+    async function startScan(tipo) {
+      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte o código para o retângulo.`;
+      focusRect.style.display = 'block';
+
+      try {
+        // Iniciar stream de vídeo com fallback para câmera frontal
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+          // Fallback para câmera frontal se a traseira falhar
+          return await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+        });
+        video.srcObject = stream;
+        video.play();
+
+        if (barcodeDetector) {
+          scanWithBarcodeDetector(tipo);
+        } else {
+          scanWithQuagga(tipo);
+        }
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
+        console.error('Erro ao iniciar câmera:', err);
         focusRect.style.display = 'none';
       }
     }
 
-    async function startScan(tipo) {
-      if (tipo === 'nota') {
-        document.getElementById('manualNota').style.display = 'none';
-        manualMode.nota = false;
-      } else {
-        document.getElementById('manualProduto').style.display = 'none';
-        manualMode.produto = false;
-      }
-      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
-      focusRect.style.display = 'block';
-      // Listar câmeras disponíveis
-      const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(d => d.kind === 'videoinput' && (d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('traseira')));
-      const allVideoDevices = devices.filter(d => d.kind === 'videoinput');
-      cameraSelect.innerHTML = '';
-      if (videoDevices.length === 0) {
-        videoDevices.push(...allVideoDevices);
-      }
-      if (videoDevices.length > 1) {
-        cameraSelect.style.display = 'inline-block';
-        videoDevices.forEach((device, idx) => {
-          const option = document.createElement('option');
-          option.value = device.deviceId;
-          option.text = device.label || `Câmera ${idx+1}`;
-          cameraSelect.appendChild(option);
-        });
-        cameraSelect.onchange = function() {
-          selectedDeviceId = cameraSelect.value;
+    async function scanWithBarcodeDetector(tipo) {
+      let attempts = 0;
+      const maxAttempts = 100; // Limita tentativas para evitar loop infinito
+      async function scanFrame() {
+        if (attempts >= maxAttempts) {
+          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
           stopVideo();
-          startScan(tipo);
-        };
-        selectedDeviceId = cameraSelect.value || videoDevices[0].deviceId;
-      } else {
-        cameraSelect.style.display = 'none';
-        selectedDeviceId = videoDevices[0]?.deviceId || null;
-      }
-      // Parar qualquer instância anterior do Quagga
-      if (window.Quagga && Quagga.initialized) {
-        Quagga.stop();
-        Quagga.initialized = false;
-      }
-      // Configurar QuaggaJS
-      Quagga.init({
-        inputStream: {
-          name: 'Live',
-          type: 'LiveStream',
-          target: video,
-          constraints: {
-            deviceId: selectedDeviceId ? selectedDeviceId : undefined,
-            width: 640,
-            height: 480,
-            facingMode: 'environment'
-          },
-        },
-        locator: {
-          patchSize: 'medium',
-          halfSample: true
-        },
-        numOfWorkers: 2,
-        decoder: {
-          readers: ['code_128_reader','ean_reader','ean_8_reader','upc_reader','upc_e_reader']
-        },
-        locate: true
-      }, function(err) {
-        if (err) {
-          resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
           focusRect.style.display = 'none';
           return;
         }
-        Quagga.initialized = true;
-        Quagga.start();
-      });
-      Quagga.onDetected(function(data) {
-        if (data && data.codeResult && data.codeResult.code) {
-          if (tipo === 'nota') {
-            notaFiscal = data.codeResult.code;
-            resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+        try {
+          const barcodes = await barcodeDetector.detect(video);
+          if (barcodes && barcodes.length > 0) {
+            const code = barcodes[0].rawValue;
+            if (tipo === 'nota') {
+              notaFiscal = code;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+            } else {
+              produto = code;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+            }
+            stopVideo();
+            focusRect.style.display = 'none';
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
           } else {
-            produto = data.codeResult.code;
-            resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+            attempts++;
+            requestAnimationFrame(scanFrame);
           }
-          stopVideo();
-          focusRect.style.display = 'none';
-          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${data.codeResult.code}`);
+        } catch (err) {
+          attempts++;
+          requestAnimationFrame(scanFrame);
         }
-      });
+      }
+      requestAnimationFrame(scanFrame);
+    }
+
+    function scanWithQuagga(tipo) {
+      try {
+        Quagga.init({
+          inputStream: {
+            name: 'Live',
+            type: 'LiveStream',
+            target: video,
+            constraints: {
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
+            singleChannel: false // Usa cores para melhor precisão
+          },
+          decoder: {
+            readers: [
+              'code_128_reader',
+              'ean_reader',
+              'ean_8_reader',
+              'upc_reader',
+              'upc_e_reader',
+              'code_39_reader',
+              'code_93_reader',
+              'codabar_reader'
+            ]
+          },
+          locator: { patchSize: 'medium', halfSample: true },
+          numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2), // Reduz workers
+          locate: true
+        }, function(err) {
+          if (err) {
+            resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar a página.';
+            console.error('Erro QuaggaJS:', err);
+            focusRect.style.display = 'none';
+            stopVideo();
+            return;
+          }
+          Quagga.start();
+        });
+
+        Quagga.onDetected(function(data) {
+          if (data && data.codeResult && data.codeResult.code) {
+            const code = data.codeResult.code;
+            if (tipo === 'nota') {
+              notaFiscal = code;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+            } else {
+              produto = code;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+            }
+            Quagga.stop();
+            focusRect.style.display = 'none';
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+            stopVideo();
+          }
+        });
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao configurar QuaggaJS. Tente novamente.';
+        console.error('Erro QuaggaJS:', err);
+        focusRect.style.display = 'none';
+        stopVideo();
+      }
     }
 
     function stopVideo() {
-      if (window.Quagga && Quagga.initialized) {
-        Quagga.stop();
-        Quagga.initialized = false;
-      }
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
+      const stream = video.srcObject;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
         video.srcObject = null;
       }
-      flashBtn.style.display = 'none';
-      cameraSelect.style.display = 'none';
     }
 
     function showResults() {
-      // Se estiver em modo manual, pegar valores dos inputs
-      if (manualMode.nota) {
-        notaFiscal = document.getElementById('manualNota').value;
-      }
-      if (manualMode.produto) {
-        produto = document.getElementById('manualProduto').value;
-      }
       quantidade = document.getElementById('quantidade').value;
       if (notaFiscal && produto && quantidade) {
         resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
       } else {
-        resultDiv.innerHTML = 'Escaneie ou digite ambos os códigos e informe a quantidade!';
+        resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
       }
     }
 
     function sendWhatsApp() {
-      if (manualMode.nota) {
-        notaFiscal = document.getElementById('manualNota').value;
-      }
-      if (manualMode.produto) {
-        produto = document.getElementById('manualProduto').value;
-      }
       quantidade = document.getElementById('quantidade').value;
       if (notaFiscal && produto && quantidade) {
         const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
@@ -216,20 +260,6 @@
         alert('Preencha todas as informações antes de enviar!');
       }
     }
-
-    // Controle do flash
-    flashBtn.onclick = async function() {
-      if (streamTrack && streamTrack.getCapabilities && streamTrack.getCapabilities().torch) {
-        const settings = streamTrack.getSettings();
-        const isOn = settings.torch === true;
-        try {
-          await streamTrack.applyConstraints({ advanced: [{ torch: !isOn }] });
-          flashBtn.textContent = !isOn ? 'Desligar Flash' : 'Ligar Flash';
-        } catch (e) {
-          alert('Não foi possível controlar o flash nesta câmera.');
-        }
-      }
-    };
   </script>
 </body>
 </html>
