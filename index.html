@@ -62,6 +62,9 @@
       border: 2px solid #333;
       border-radius: 5px;
     }
+    #fileInput {
+      display: none;
+    }
     #productList {
       margin-top: 20px;
     }
@@ -124,6 +127,7 @@
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
     const photoPreviewDiv = document.getElementById('photoPreview');
+    const fileInput = document.getElementById('fileInput');
     let barcodeDetector = null;
 
     // Verifica suporte à Barcode Detection API
@@ -139,40 +143,40 @@
     });
 
     async function startScan(tipo) {
-      resultDiv.innerHTML = `Iniciando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte a câmera.`;
+      resultDiv.innerHTML = `Iniciando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
       focusRect.style.display = 'block';
 
-      try {
-        const constraints = {
-          video: { 
-            facingMode: { ideal: 'environment' }, 
-            width: { ideal: 1280 }, 
-            height: { ideal: 720 },
-            focusMode: 'continuous' // Melhora o foco automático
-          }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
-          return await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
+      if (tipo === 'nota') {
+        try {
+          const constraints = {
+            video: { 
+              facingMode: { ideal: 'environment' }, 
+              width: { ideal: 1280 }, 
+              height: { ideal: 720 },
+              focusMode: 'continuous'
+            }
+          };
+          const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+            return await navigator.mediaDevices.getUserMedia({
+              video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
+            });
           });
-        });
-        video.srcObject = stream;
-        video.play();
+          video.srcObject = stream;
+          video.play();
 
-        if (tipo === 'nota') {
           if (barcodeDetector) {
             await scanWithBarcodeDetector(tipo);
           } else {
             await scanWithQuagga(tipo);
           }
-        } else if (tipo === 'produto') {
-          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
-          takePhotoBtn.style.display = 'inline';
+        } catch (err) {
+          resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
+          console.error('Erro ao iniciar câmera:', err);
+          focusRect.style.display = 'none';
         }
-      } catch (err) {
-        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
-        console.error('Erro ao iniciar câmera:', err);
-        focusRect.style.display = 'none';
+      } else if (tipo === 'produto') {
+        currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+        takePhotoBtn.style.display = 'inline';
       }
     }
 
@@ -305,7 +309,7 @@
           photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
           photoPreviewDiv.style.display = 'block';
           takePhotoBtn.style.display = 'none';
-          fileInput.value = '';
+          fileInput.value = ''; // Limpa o input para novos uploads
           confirmPhotoBtn.style.display = 'inline';
           retakePhotoBtn.style.display = 'inline';
         };
@@ -321,23 +325,24 @@
       // Extração de informações com OCR otimizado
       const result = await Tesseract.recognize(currentProduct.image, 'por', {
         logger: m => console.log(m),
-        psm: 6 // Assume texto em uma única linha uniforme
+        psm: 11 // Texto esparso, mais adequado para layouts variados
       });
       const text = result.data.text.trim();
-      console.log('Texto extraído da foto:', text);
-      const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+      console.log('Texto bruto extraído da foto:', text); // Log detalhado
+      const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+      console.log('Linhas processadas:', lines); // Log das linhas
       let dataRecognized = false;
       for (let line of lines) {
         if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/) && !currentProduct.internalCode) {
           currentProduct.internalCode = line; // Código interno (ex.: 00.00.00.0000)
           dataRecognized = true;
-        } else if (line.match(/^\d{5,13}$/) && !currentProduct.code) { // Código de barras (5 a 13 dígitos)
+        } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) { // Código de barras (7 a 13 dígitos, mais restritivo)
           currentProduct.code = line;
           dataRecognized = true;
-        } else if (line.match(/GATILHO/i) && !currentProduct.description) { // Descrição com "GATILHO" (case insensitive)
-          currentProduct.description = line;
+        } else if (line.match(/GATILHO/i) && !currentProduct.description) { // Descrição com "GATILHO"
+          currentProduct.description = line.replace(/GATILHO/i, '').trim() || line; // Remove "GATILHO" se presente
           dataRecognized = true;
-        } else if (line.match(/^\d{2}\/\d{2}\/\d{4}$/) && !currentProduct.date) { // Data (dd/mm/aaaa)
+        } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) { // Data (dd-mm-yyyy ou dd/mm/yyyy)
           currentProduct.date = line;
           dataRecognized = true;
         } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) { // OP (6 dígitos, sem "/1")
@@ -346,7 +351,7 @@
         }
       }
       if (!dataRecognized) {
-        resultDiv.innerHTML = 'Nenhum dado reconhecido. Ajuste a iluminação ou reposicione a etiqueta no retângulo vermelho e tire outra foto.';
+        resultDiv.innerHTML = 'Nenhum dado reconhecido. Verifique se a etiqueta contém os campos esperados (Código interno, Descrição com "GATILHO", Data, OP) e tire outra foto.';
         retakePhotoBtn.style.display = 'inline';
         return;
       }
