@@ -93,7 +93,8 @@
   <button id="newNote" style="display:none;" onclick="newNote()">Nova Nota</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
   <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
-  <button id="takePhoto" style="display:none;" onclick="takeProductPhoto()">Tirar Foto</button>
+  <input type="file" id="fileInput" accept="image/*" capture="camera" onchange="handleFileUpload()">
+  <button id="takePhoto" style="display:none;" onclick="document.getElementById('fileInput').click()">Tirar Foto</button>
   <button id="confirmPhoto" style="display:none;" onclick="confirmProductPhoto()">Confirmar</button>
   <button id="retakePhoto" style="display:none;" onclick="retakeProductPhoto()">Tirar Outra Foto</button>
   <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
@@ -295,33 +296,21 @@
       addProductBtn.style.display = 'none';
     }
 
-    async function takeProductPhoto() {
-      const canvas = document.createElement('canvas');
-      const rectWidth = video.offsetWidth * 0.9; // 90% da largura do video
-      const rectHeight = 250; // Altura do retângulo vermelho
-      const rectX = (video.videoWidth - rectWidth) / 2;
-      const rectY = (video.videoHeight - rectHeight) / 2;
-      canvas.width = rectWidth;
-      canvas.height = rectHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, rectX, rectY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
-
-      // Pré-processamento da imagem
-      const imageData = ctx.getImageData(0, 0, rectWidth, rectHeight);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-        const threshold = 128; // Binarização simples
-        const value = brightness > threshold ? 255 : 0;
-        data[i] = data[i + 1] = data[i + 2] = value; // Escala de cinza e binarização
+    function handleFileUpload() {
+      const file = fileInput.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          currentProduct.image = e.target.result;
+          photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
+          photoPreviewDiv.style.display = 'block';
+          takePhotoBtn.style.display = 'none';
+          fileInput.value = '';
+          confirmPhotoBtn.style.display = 'inline';
+          retakePhotoBtn.style.display = 'inline';
+        };
+        reader.readAsDataURL(file);
       }
-      ctx.putImageData(imageData, 0, 0);
-      currentProduct.image = canvas.toDataURL('image/jpeg');
-      photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
-      photoPreviewDiv.style.display = 'block';
-      takePhotoBtn.style.display = 'none';
-      confirmPhotoBtn.style.display = 'inline';
-      retakePhotoBtn.style.display = 'inline';
     }
 
     async function confirmProductPhoto() {
