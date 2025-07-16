@@ -91,14 +91,15 @@
   </div>
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
-
   <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
+  <button id="takePhoto" style="display:none;" onclick="takeProductPhoto()">Tirar Foto</button>
   <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
   <button id="saveLote" style="display:none;" onclick="saveLote()">Salvar Quantidade</button>
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
   <div id="productList"></div>
+  <div id="photoPreview"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
@@ -111,11 +112,12 @@
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
     const addProductBtn = document.getElementById('addProduct');
+    const takePhotoBtn = document.getElementById('takePhoto');
     const loteQuantityInput = document.getElementById('loteQuantity');
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
+    const photoPreviewDiv = document.getElementById('photoPreview');
     let barcodeDetector = null;
-    let extractedText = '';
 
     // Verifica suporte à Barcode Detection API
     window.addEventListener('load', () => {
@@ -130,7 +132,7 @@
     });
 
     async function startScan(tipo) {
-      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte o código para o retângulo.`;
+      resultDiv.innerHTML = `Iniciando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte a câmera.`;
       focusRect.style.display = 'block';
 
       try {
@@ -145,12 +147,15 @@
         video.srcObject = stream;
         video.play();
 
-        await extractTextFromVideo(tipo);
-
-        if (barcodeDetector) {
-          await scanWithBarcodeDetector(tipo);
-        } else {
-          await scanWithQuagga(tipo);
+        if (tipo === 'nota') {
+          if (barcodeDetector) {
+            await scanWithBarcodeDetector(tipo);
+          } else {
+            await scanWithQuagga(tipo);
+          }
+        } else if (tipo === 'produto') {
+          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+          takePhotoBtn.style.display = 'inline';
         }
       } catch (err) {
         resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
@@ -159,88 +164,33 @@
       }
     }
 
-    async function extractTextFromVideo(tipo) {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      let attempts = 0;
-      const maxAttempts = 50;
-
-      async function captureFrame() {
-        if (attempts >= maxAttempts) {
-          console.log('OCR: Máximo de tentativas atingido.');
-          return;
-        }
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const result = await Tesseract.recognize(canvas.toDataURL(), 'por', { logger: m => console.log(m) });
-        extractedText = result.data.text.trim();
-        console.log('Texto extraído:', extractedText);
-
-        // Capturar imagem da nota automaticamente
-        if (tipo === 'nota' && !notaFiscalImage) {
-          notaFiscalImage = canvas.toDataURL('image/jpeg');
-        } else if (tipo === 'produto' && !currentProduct) {
-          currentProduct = { image: canvas.toDataURL('image/jpeg'), code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
-        }
-
-        // Extrair campos específicos
-        const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
-        for (let line of lines) {
-          if (tipo === 'nota' && line.match(/^\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}$/) && !notaFiscal) {
-            notaFiscal = line; // CNPJ como identificador da nota
-          } else if (tipo === 'produto') {
-            if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/) && !currentProduct.internalCode) {
-              currentProduct.internalCode = line; // Código interno
-            } else if (line.includes('GATILHO') && !currentProduct.description) {
-              currentProduct.description = line; // Descrição
-            } else if (line.match(/^\d{2}\/\d{2}\/\d{4}$/) && !currentProduct.date) {
-              currentProduct.date = line; // Data
-            } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
-              currentProduct.op = line; // OP sem "/1"
-            }
-          }
-        }
-
-        if ((tipo === 'nota' && !notaFiscal) || (tipo === 'produto' && (!currentProduct.internalCode || !currentProduct.description || !currentProduct.date || !currentProduct.op))) {
-          attempts++;
-          requestAnimationFrame(captureFrame);
-        }
-      }
-      requestAnimationFrame(captureFrame);
-    }
-
     async function scanWithBarcodeDetector(tipo) {
       let attempts = 0;
       const maxAttempts = 100;
       async function scanFrame() {
-      if (attempts >= maxAttempts) {
-        resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
-        stopVideo();
-        focusRect.style.display = 'none';
-        if (tipo === 'produto' && currentProduct) {
-          showLoteInput();
+        if (attempts >= maxAttempts) {
+          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
+          stopVideo();
+          focusRect.style.display = 'none';
+          return;
         }
-        return;
-      }
         try {
           const barcodes = await barcodeDetector.detect(video);
           if (barcodes && barcodes.length > 0) {
             const code = barcodes[0].rawValue;
             if (tipo === 'nota' && !notaFiscal) {
               notaFiscal = code;
+              const canvas = document.createElement('canvas');
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              notaFiscalImage = canvas.toDataURL('image/jpeg');
               resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            } else if (tipo === 'produto' && !currentProduct.code) {
-              currentProduct.code = code;
-              resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code}\nTexto extraído: ${extractedText}`;
             }
             stopVideo();
             focusRect.style.display = 'none';
-            if (tipo === 'produto' && currentProduct) {
-              showLoteInput();
-            } else {
-              addProductBtn.style.display = 'inline-block';
-            }
+            addProductBtn.style.display = 'inline-block';
             console.log(`Código detectado (${tipo}):`, code);
             alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
           } else {
@@ -248,6 +198,7 @@
             requestAnimationFrame(scanFrame);
           }
         } catch (err) {
+          console.error('Erro na detecção de código de barras:', err);
           attempts++;
           requestAnimationFrame(scanFrame);
         }
@@ -288,21 +239,20 @@
             const code = data.codeResult.code;
             if (tipo === 'nota' && !notaFiscal) {
               notaFiscal = code;
+              const canvas = document.createElement('canvas');
+              canvas.width = video.videoWidth;
+              canvas.height = video.videoHeight;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              notaFiscalImage = canvas.toDataURL('image/jpeg');
               resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            } else if (tipo === 'produto' && !currentProduct.code) {
-              currentProduct.code = code;
-              resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code}\nTexto extraído: ${extractedText}`;
             }
             Quagga.stop();
             focusRect.style.display = 'none';
-          if (tipo === 'produto' && currentProduct) {
-            showLoteInput();
-          } else {
             addProductBtn.style.display = 'inline-block';
-          }
-          console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
-          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
-          stopVideo();
+            console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+            stopVideo();
           }
         });
       } catch (err) {
@@ -321,7 +271,7 @@
       }
     }
 
-    function takeProductPhoto() {
+    async function takeProductPhoto() {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
@@ -331,6 +281,26 @@
       photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
       photoPreviewDiv.style.display = 'block';
       takePhotoBtn.style.display = 'none';
+
+      // Extração de informações da foto
+      const result = await Tesseract.recognize(currentProduct.image, 'por', { logger: m => console.log(m) });
+      const text = result.data.text.trim();
+      console.log('Texto extraído da foto:', text);
+      const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+      for (let line of lines) {
+        if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/) && !currentProduct.internalCode) {
+          currentProduct.internalCode = line; // Código interno
+        } else if (line.match(/^\d{5,13}$/) && !currentProduct.code) { // Tentativa de extrair código de barras
+          currentProduct.code = line;
+        } else if (line.includes('GATILHO') && !currentProduct.description) {
+          currentProduct.description = line; // Descrição
+        } else if (line.match(/^\d{2}\/\d{2}\/\d{4}$/) && !currentProduct.date) {
+          currentProduct.date = line; // Data
+        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
+          currentProduct.op = line; // OP sem "/1"
+        }
+      }
+      resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
       showLoteInput();
     }
 
@@ -345,15 +315,15 @@
       if (quantity && currentProduct && currentProduct.image) {
         currentProduct.lotes.push(parseInt(quantity));
         products.push({ ...currentProduct });
-        resultDiv.innerHTML = `Lote salvo para ${currentProduct.code}. Quantidade: ${quantity}`;
+        resultDiv.innerHTML = `Lote salvo para ${currentProduct.code || 'Produto'}. Quantidade: ${quantity}`;
         loteQuantityInput.style.display = 'none';
         saveLoteBtn.style.display = 'none';
+        photoPreviewDiv.style.display = 'none';
         currentProduct = null;
-        extractedText = '';
         updateProductList();
         addProductBtn.style.display = 'inline-block';
       } else {
-        alert('Digite uma quantidade válida!');
+        alert('Tire uma foto e digite uma quantidade válida!');
       }
     }
 
@@ -385,7 +355,7 @@
       let totalQuantity = 0;
       products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
       const message = `Nota Fiscal: ${notaFiscal}\nImagem Nota: ${notaFiscalImage}\nTotal Produtos: ${products.length}\nTotal Quantidade: ${totalQuantity}\nProdutos:\n${products.map(prod => 
-        `Código: ${prod.code}, Código Interno: ${prod.internalCode}, Descrição: ${prod.description}, Data: ${prod.date}, OP: ${prod.op}, Lotes: ${prod.lotes.join(', ')}`).join('\n')}`;
+        `Código: ${prod.code || 'Não identificado'}, Código Interno: ${prod.internalCode}, Descrição: ${prod.description}, Data: ${prod.date}, OP: ${prod.op}, Lotes: ${prod.lotes.join(', ')}`).join('\n')}`;
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
     }
