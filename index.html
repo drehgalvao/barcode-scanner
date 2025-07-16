@@ -91,15 +91,14 @@
   </div>
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
+
   <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
-  <button id="takePhoto" style="display:none;" onclick="takeProductPhoto()">Tirar Foto</button>
   <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
   <button id="saveLote" style="display:none;" onclick="saveLote()">Salvar Quantidade</button>
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
   <div id="productList"></div>
-  <div id="photoPreview"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
@@ -112,11 +111,9 @@
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
     const addProductBtn = document.getElementById('addProduct');
-    const takePhotoBtn = document.getElementById('takePhoto');
     const loteQuantityInput = document.getElementById('loteQuantity');
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
-    const photoPreviewDiv = document.getElementById('photoPreview');
     let barcodeDetector = null;
     let extractedText = '';
 
@@ -184,7 +181,7 @@
         if (tipo === 'nota' && !notaFiscalImage) {
           notaFiscalImage = canvas.toDataURL('image/jpeg');
         } else if (tipo === 'produto' && !currentProduct) {
-          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+          currentProduct = { image: canvas.toDataURL('image/jpeg'), code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
         }
 
         // Extrair campos específicos
@@ -217,15 +214,15 @@
       let attempts = 0;
       const maxAttempts = 100;
       async function scanFrame() {
-        if (attempts >= maxAttempts) {
-          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
-          stopVideo();
-          focusRect.style.display = 'none';
-          if (tipo === 'produto') {
-            takePhotoBtn.style.display = 'inline';
-          }
-          return;
+      if (attempts >= maxAttempts) {
+        resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
+        stopVideo();
+        focusRect.style.display = 'none';
+        if (tipo === 'produto' && currentProduct) {
+          showLoteInput();
         }
+        return;
+      }
         try {
           const barcodes = await barcodeDetector.detect(video);
           if (barcodes && barcodes.length > 0) {
@@ -239,11 +236,12 @@
             }
             stopVideo();
             focusRect.style.display = 'none';
-            if (tipo === 'produto') {
-              takePhotoBtn.style.display = 'inline';
+            if (tipo === 'produto' && currentProduct) {
+              showLoteInput();
             } else {
               addProductBtn.style.display = 'inline-block';
             }
+            console.log(`Código detectado (${tipo}):`, code);
             alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
           } else {
             attempts++;
@@ -297,13 +295,14 @@
             }
             Quagga.stop();
             focusRect.style.display = 'none';
-            if (tipo === 'produto') {
-              takePhotoBtn.style.display = 'inline';
-            } else {
-              addProductBtn.style.display = 'inline-block';
-            }
-            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
-            stopVideo();
+          if (tipo === 'produto' && currentProduct) {
+            showLoteInput();
+          } else {
+            addProductBtn.style.display = 'inline-block';
+          }
+          console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
+          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+          stopVideo();
           }
         });
       } catch (err) {
@@ -349,13 +348,12 @@
         resultDiv.innerHTML = `Lote salvo para ${currentProduct.code}. Quantidade: ${quantity}`;
         loteQuantityInput.style.display = 'none';
         saveLoteBtn.style.display = 'none';
-        photoPreviewDiv.style.display = 'none';
         currentProduct = null;
         extractedText = '';
         updateProductList();
         addProductBtn.style.display = 'inline-block';
       } else {
-        alert('Tire uma foto e digite uma quantidade válida!');
+        alert('Digite uma quantidade válida!');
       }
     }
 
