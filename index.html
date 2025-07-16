@@ -12,15 +12,18 @@
     button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
     input { padding: 10px; font-size: 16px; width: 150px; }
     #scanArea { position: relative; display: inline-block; }
-    #focusRect { 
-      position: absolute; 
-      border: 2px dashed red; 
-      width: 80%; 
-      height: 150px; 
-      top: 50%; 
-      left: 50%; 
-      transform: translate(-50%, -50%); 
-      display: none; 
+    #focusRect {
+      position: absolute;
+      border: 3px solid #d00;
+      background: rgba(255,0,0,0.08);
+      width: 80%;
+      height: 150px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      box-shadow: 0 0 10px 2px #d00;
+      z-index: 2;
     }
   </style>
 </head>
@@ -29,6 +32,9 @@
   <div id="scanArea">
     <video id="video" autoplay></video>
     <div id="focusRect"></div>
+    <div style="color:#d00; font-weight:bold; margin-top:5px;">Alinhe o código de barras dentro do retângulo vermelho para melhor leitura.</div>
+    <button id="flashBtn" style="display:none; margin-top:10px;">Ligar Flash</button>
+    <select id="cameraSelect" style="display:none; margin-top:10px;"></select>
   </div>
   <canvas id="canvas" style="display:none;"></canvas>
   <div style="margin-bottom:10px;">
@@ -53,6 +59,11 @@
     let produto = '';
     let quantidade = '';
     let manualMode = { nota: false, produto: false };
+    let streamTrack = null;
+    const flashBtn = document.getElementById('flashBtn');
+    const cameraSelect = document.getElementById('cameraSelect');
+    let selectedDeviceId = null;
+
     function showManualInput(tipo) {
       if (tipo === 'nota') {
         document.getElementById('manualNota').style.display = 'inline-block';
@@ -91,29 +102,88 @@
       }
       resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
       focusRect.style.display = 'block';
+      // Listar câmeras disponíveis
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+      if (videoDevices.length > 1) {
+        cameraSelect.style.display = 'inline-block';
+        videoDevices.forEach((device, idx) => {
+          const option = document.createElement('option');
+          option.value = device.deviceId;
+          option.text = device.label || `Câmera ${idx+1}`;
+          cameraSelect.appendChild(option);
+        });
+        cameraSelect.onchange = function() {
+          selectedDeviceId = cameraSelect.value;
+          stopVideo();
+          startScan(tipo);
+        };
+        selectedDeviceId = cameraSelect.value || videoDevices[0].deviceId;
+      } else {
+        cameraSelect.style.display = 'none';
+        selectedDeviceId = videoDevices[0]?.deviceId || null;
+      }
       try {
         // Iniciar stream de vídeo
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const constraints = { video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined, facingMode: 'environment' } };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
         video.play();
+        // Verifica suporte ao flash
+        streamTrack = stream.getVideoTracks()[0];
+        if (streamTrack && streamTrack.getCapabilities) {
+          const caps = streamTrack.getCapabilities();
+          if (caps.torch) {
+            flashBtn.style.display = 'inline-block';
+          } else {
+            flashBtn.style.display = 'none';
+          }
+        }
+        // Aguarda vídeo carregar para pegar dimensões corretas
+        await new Promise(resolve => {
+          video.onloadedmetadata = resolve;
+        });
 
         // Configurar canvas para pré-processamento
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
 
+        // Definir área de foco central
+        const focusW = Math.floor(canvas.width * 0.8);
+        const focusH = 150;
+        const focusX = Math.floor((canvas.width - focusW) / 2);
+        const focusY = Math.floor((canvas.height - focusH) / 2);
+
         // Loop para pré-processar e escanear
         async function scanFrame() {
           if (!video.srcObject) return; // Para o loop se o vídeo for parado
           ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          let src = cv.imread(canvas);
-          // Pré-processamento com OpenCV
+          // Captura apenas a área de foco
+          let frame = ctx.getImageData(focusX, focusY, focusW, focusH);
+          let tempCanvas = document.createElement('canvas');
+          tempCanvas.width = focusW;
+          tempCanvas.height = focusH;
+          let tempCtx = tempCanvas.getContext('2d');
+          tempCtx.putImageData(frame, 0, 0);
+
+          // OpenCV: pré-processamento
+          let src = cv.imread(tempCanvas);
           let dst = new cv.Mat();
           cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY); // Escala de cinza
-          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2); // Binarização
-          // Converter para imagem que o ZXing pode usar
+          // Aplica sharpening (nitidez)
+          let kernel = cv.Mat.ones(3, 3, cv.CV_32F);
+          kernel.data32F[4] = 9.0;
+          kernel.data32F[1] = kernel.data32F[3] = kernel.data32F[5] = kernel.data32F[7] = -1.0;
+          cv.filter2D(dst, dst, cv.CV_8U, kernel);
+          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2);
+
+          // Exibe área processada no canvas principal para debug
           cv.imshow(canvas, dst);
           src.delete();
           dst.delete();
+          kernel.delete();
+
           try {
             const result = await codeReader.decodeFromImage(canvas);
             if (result) {
@@ -147,6 +217,8 @@
         video.srcObject.getTracks().forEach(track => track.stop());
         video.srcObject = null;
       }
+      flashBtn.style.display = 'none';
+      cameraSelect.style.display = 'none';
     }
 
     function showResults() {
@@ -181,6 +253,20 @@
         alert('Preencha todas as informações antes de enviar!');
       }
     }
+
+    // Controle do flash
+    flashBtn.onclick = async function() {
+      if (streamTrack && streamTrack.getCapabilities && streamTrack.getCapabilities().torch) {
+        const settings = streamTrack.getSettings();
+        const isOn = settings.torch === true;
+        try {
+          await streamTrack.applyConstraints({ advanced: [{ torch: !isOn }] });
+          flashBtn.textContent = !isOn ? 'Desligar Flash' : 'Ligar Flash';
+        } catch (e) {
+          alert('Não foi possível controlar o flash nesta câmera.');
+        }
+      }
+    };
   </script>
 </body>
 </html>
