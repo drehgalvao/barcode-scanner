@@ -305,6 +305,17 @@
       canvas.height = rectHeight;
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, rectX, rectY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
+
+      // Pré-processamento da imagem
+      const imageData = ctx.getImageData(0, 0, rectWidth, rectHeight);
+      const data = imageData.data;
+      for (let i = 0; i < data.length; i += 4) {
+        const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
+        const threshold = 128; // Binarização simples
+        const value = brightness > threshold ? 255 : 0;
+        data[i] = data[i + 1] = data[i + 2] = value; // Escala de cinza e binarização
+      }
+      ctx.putImageData(imageData, 0, 0);
       currentProduct.image = canvas.toDataURL('image/jpeg');
       photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
       photoPreviewDiv.style.display = 'block';
@@ -318,23 +329,37 @@
       confirmPhotoBtn.style.display = 'none';
       retakePhotoBtn.style.display = 'none';
 
-      // Extração de informações da foto
-      const result = await Tesseract.recognize(currentProduct.image, 'por', { logger: m => console.log(m) });
+      // Extração de informações com OCR otimizado
+      const result = await Tesseract.recognize(currentProduct.image, 'por', {
+        logger: m => console.log(m),
+        psm: 6 // Assume texto em uma única linha uniforme
+      });
       const text = result.data.text.trim();
       console.log('Texto extraído da foto:', text);
       const lines = text.split('\n').map(line => line.trim()).filter(line => line);
+      let dataRecognized = false;
       for (let line of lines) {
         if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/) && !currentProduct.internalCode) {
-          currentProduct.internalCode = line; // Código interno
-        } else if (line.match(/^\d{5,13}$/) && !currentProduct.code) { // Tentativa de extrair código de barras
+          currentProduct.internalCode = line; // Código interno (ex.: 00.00.00.0000)
+          dataRecognized = true;
+        } else if (line.match(/^\d{5,13}$/) && !currentProduct.code) { // Código de barras (5 a 13 dígitos)
           currentProduct.code = line;
-        } else if (line.includes('GATILHO') && !currentProduct.description) {
-          currentProduct.description = line; // Descrição
-        } else if (line.match(/^\d{2}\/\d{2}\/\d{4}$/) && !currentProduct.date) {
-          currentProduct.date = line; // Data
-        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
-          currentProduct.op = line; // OP sem "/1"
+          dataRecognized = true;
+        } else if (line.match(/GATILHO/i) && !currentProduct.description) { // Descrição com "GATILHO" (case insensitive)
+          currentProduct.description = line;
+          dataRecognized = true;
+        } else if (line.match(/^\d{2}\/\d{2}\/\d{4}$/) && !currentProduct.date) { // Data (dd/mm/aaaa)
+          currentProduct.date = line;
+          dataRecognized = true;
+        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) { // OP (6 dígitos, sem "/1")
+          currentProduct.op = line;
+          dataRecognized = true;
         }
+      }
+      if (!dataRecognized) {
+        resultDiv.innerHTML = 'Nenhum dado reconhecido. Ajuste a iluminação ou reposicione a etiqueta no retângulo vermelho e tire outra foto.';
+        retakePhotoBtn.style.display = 'inline';
+        return;
       }
       resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
       showLoteInput();
