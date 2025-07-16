@@ -104,8 +104,15 @@
       focusRect.style.display = 'block';
       // Listar câmeras disponíveis
       const devices = await navigator.mediaDevices.enumerateDevices();
-      const videoDevices = devices.filter(d => d.kind === 'videoinput');
+      // Filtrar apenas câmeras traseiras (label contém 'back' ou 'traseira', ignorando maiúsculas/minúsculas)
+      const videoDevices = devices.filter(d => d.kind === 'videoinput' && (d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('traseira')));
+      // Se não encontrar nenhuma, usa todas como fallback
+      const allVideoDevices = devices.filter(d => d.kind === 'videoinput');
       cameraSelect.innerHTML = '';
+      if (videoDevices.length === 0) {
+        // fallback para todas se não encontrar traseira
+        videoDevices.push(...allVideoDevices);
+      }
       if (videoDevices.length > 1) {
         cameraSelect.style.display = 'inline-block';
         videoDevices.forEach((device, idx) => {
@@ -126,7 +133,7 @@
       }
       try {
         // Iniciar stream de vídeo
-        const constraints = { video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined, facingMode: 'environment' } };
+        const constraints = { video: { deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined } };
         const stream = await navigator.mediaDevices.getUserMedia(constraints);
         video.srcObject = stream;
         video.play();
