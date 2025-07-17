@@ -1,402 +1,150 @@
 
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Leitura de Códigos de Barras</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      text-align: center;
-      margin: 0;
-      padding: 10px;
-      background-color: #f0f0f0;
-    }
-    #container {
-      max-width: 600px;
-      margin: 0 auto;
-    }
-    #scanArea {
-      position: relative;
-      margin: 20px 0;
-    }
-    video {
-      width: 100%;
-      border: 2px solid #333;
-      border-radius: 5px;
-    }
-    #focusRect {
-      position: absolute;
-      border: 2px dashed #ff0000;
-      width: 90%;
-      height: 250px;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      display: none;
-      pointer-events: none;
-    }
-    .button-group {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: center;
-      gap: 10px;
-      margin: 10px 0;
-    }
-    button {
-      padding: 10px 20px;
-      font-size: 14px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    button:hover {
-      background-color: #0056b3;
-    }
-    .editable-box {
-      display: inline-block;
-      padding: 10px;
-      margin: 5px;
-      border: 2px solid #333;
-      border-radius: 5px;
-      background-color: #fff;
-      min-width: 150px;
-    }
-    input[type="text"], input[type="number"] {
-      padding: 8px;
-      font-size: 14px;
-      width: 100%;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-      box-sizing: border-box;
-    }
-    #productList {
-      margin-top: 20px;
-      text-align: left;
-    }
-    .product-item {
-      margin: 10px 0;
-      padding: 10px;
-      background-color: #fff;
-      border: 1px solid #ddd;
-      border-radius: 5px;
-    }
-    img {
-      max-width: 200px;
-      margin-top: 10px;
-    }
-    #photoPreview {
-      margin: 10px 0;
-    }
-    @media (max-width: 400px) {
-      button {
-        width: 100%;
-        margin: 5px 0;
-      }
-      .editable-box {
-        width: 100%;
-        margin: 5px 0;
-      }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Processador de NF e Itens via Câmera</title>
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.0/dist/tesseract.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin-top: 20px; }
+        #result, #data { margin-top: 10px; }
+        button { margin-right: 10px; }
+        #video { width: 100%; max-width: 400px; display: none; }
+        #canvas { display: none; }
+    </style>
 </head>
 <body>
-  <div id="container">
-    <h2>Leitura de Códigos</h2>
-    <div id="scanArea">
-      <video id="video" autoplay muted playsinline></video>
-      <div id="focusRect"></div>
+    <h2>Processador de Nota Fiscal e Itens</h2>
+    <div id="step1" class="section">
+        <h3>Passo 1: Tire uma foto da Nota Fiscal</h3>
+        <video id="video1" autoplay playsinline></video>
+        <button onclick="captureNF()">Tirar Foto</button>
+        <button onclick="stopCamera('video1')">Parar Câmera</button>
+        <div id="nfResult"></div>
     </div>
-    <div class="button-group" id="notaButtons">
-      <button id="scanNota" onclick="startScan('nota')">Escanear Nota Fiscal</button>
+    <div id="step2" class="section" style="display: none;">
+        <h3>Passo 2: Tire uma foto da Etiqueta de Produto</h3>
+        <video id="video2" autoplay playsinline></video>
+        <button onclick="captureItem()">Tirar Foto</button>
+        <button onclick="stopCamera('video2')">Parar Câmera</button>
+        <button onclick="processItem()">Adicionar Item</button>
+        <button onclick="finalize()">Finalizar</button>
+        <div id="itemResult"></div>
     </div>
-    <div class="button-group" id="productButtons" style="display:none;">
-      <button id="scanProduto" onclick="startScan('produto')">Escanear Produto</button>
-    </div>
-    <div id="productData" style="display:none;">
-      <div class="editable-box">
-        <label>OP:</label><br>
-        <input type="text" id="editOp" value="">
-      </div>
-      <div class="editable-box">
-        <label>Código Produto (00.00.00.0000):</label><br>
-        <input type="text" id="editCode" value="">
-      </div>
-      <div class="editable-box">
-        <label>Data (dd/mm/aaaa):</label><br>
-        <input type="text" id="editDate" value="">
-      </div>
-      <div class="editable-box">
-        <label>Código de Barras:</label><br>
-        <input type="text" id="editBarcode" value="">
-      </div>
-      <div class="editable-box">
-        <label>Quantidade do Lote:</label><br>
-        <input type="number" id="loteQuantity" min="1" value="">
-      </div>
-      <div class="button-group" style="margin-top: 10px;">
-        <button id="saveProduct" style="display:none;" onclick="saveProduct()">Salvar Produto</button>
-      </div>
-    </div>
-    <div class="button-group" id="actionButtons" style="display:none;">
-      <button id="addProduct" onclick="startScan('produto')">Incluir Novo Produto</button>
-      <button id="reviewInfo" onclick="showResults()">Revisar Informações</button>
-      <button id="sendInfo" onclick="sendWhatsApp()">Enviar Informações</button>
-    </div>
-    <div id="result">Aguardando escaneamento...</div>
-    <div id="productList"></div>
-    <div id="photoPreview"></div>
-  </div>
+    <div id="data"></div>
+    <button onclick="sendWhatsApp()" id="sendBtn" style="display: none;">Enviar via WhatsApp</button>
+    <canvas id="canvas" width="400" height="300"></canvas>
 
-  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
-  <script>
-    let notaFiscal = '';
-    let notaFiscalImage = '';
-    let products = [];
-    let currentProduct = null;
-    const video = document.getElementById('video');
-    const resultDiv = document.getElementById('result');
-    const focusRect = document.getElementById('focusRect');
-    const notaButtons = document.getElementById('notaButtons');
-    const productButtons = document.getElementById('productButtons');
-    const productData = document.getElementById('productData');
-    const actionButtons = document.getElementById('actionButtons');
-    const saveProductBtn = document.getElementById('saveProduct');
-    const loteQuantityInput = document.getElementById('loteQuantity');
-    const editOp = document.getElementById('editOp');
-    const editCode = document.getElementById('editCode');
-    const editDate = document.getElementById('editDate');
-    const editBarcode = document.getElementById('editBarcode');
-    const productListDiv = document.getElementById('productList');
-    const photoPreviewDiv = document.getElementById('photoPreview');
-    let barcodeDetector = null;
-    let scanInterval = null;
+    <script>
+        let nfData = {};
+        let items = [];
+        let stream1 = null;
+        let stream2 = null;
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
 
-    window.addEventListener('load', () => {
-      if ('BarcodeDetector' in window) {
-        barcodeDetector = new BarcodeDetector({
-          formats: ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_39', 'code_93', 'codabar']
-        });
-        resultDiv.innerHTML = 'Usando Barcode Detection API (nativa).';
-      } else {
-        resultDiv.innerHTML = 'Barcode Detection API não suportada. Usando QuaggaJS.';
-      }
-    });
-
-    async function startScan(tipo) {
-      resultDiv.innerHTML = `Iniciando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
-      focusRect.style.display = 'block';
-
-      try {
-        const constraints = {
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
-        };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
-          return await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
-          });
-        });
-        video.srcObject = stream;
-        video.play();
-
-        if (tipo === 'nota') {
-          notaButtons.style.display = 'none';
-          if (barcodeDetector) await scanWithBarcodeDetector(tipo);
-          else await scanWithQuagga(tipo);
-        } else if (tipo === 'produto') {
-          notaButtons.style.display = 'none';
-          productButtons.style.display = 'none';
-          productData.style.display = 'none';
-          actionButtons.style.display = 'none';
-          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
-          startProductScan();
-        }
-      } catch (err) {
-        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
-        console.error('Erro:', err);
-        focusRect.style.display = 'none';
-      }
-    }
-
-    async function scanWithBarcodeDetector(tipo) {
-      let attempts = 0;
-      const maxAttempts = 100;
-      async function scanFrame() {
-        if (attempts >= maxAttempts) {
-          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
-          stopVideo();
-          focusRect.style.display = 'none';
-          return;
-        }
-        try {
-          const barcodes = await barcodeDetector.detect(video);
-          if (barcodes.length > 0) {
-            const code = barcodes[0].rawValue;
-            if (tipo === 'nota' && !notaFiscal) {
-              notaFiscal = code;
-              const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              notaFiscalImage = canvas.toDataURL('image/jpeg');
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-              stopVideo();
-              focusRect.style.display = 'none';
-              productButtons.style.display = 'flex';
+        async function startCamera(videoId) {
+            const video = document.getElementById(videoId);
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                if (videoId === 'video1') stream1 = stream;
+                else stream2 = stream;
+            } catch (err) {
+                alert('Erro ao acessar a câmera: ' + err.message);
             }
-          } else {
-            attempts++;
-            requestAnimationFrame(scanFrame);
-          }
-        } catch (err) {
-          console.error('Erro:', err);
-          attempts++;
-          requestAnimationFrame(scanFrame);
         }
-      }
-      requestAnimationFrame(scanFrame);
-    }
 
-    function scanWithQuagga(tipo) {
-      Quagga.init({
-        inputStream: { name: 'Live', type: 'LiveStream', target: video, constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }, area: { top: '10%', right: '5%', left: '5%', bottom: '10%' }, singleChannel: false },
-        decoder: { readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader', 'code_39_reader', 'code_93_reader', 'codabar_reader'] },
-        locator: { patchSize: 'medium', halfSample: true },
-        numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2),
-        locate: true
-      }, function(err) {
-        if (err) {
-          resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar.';
-          console.error('Erro:', err);
-          focusRect.style.display = 'none';
-          stopVideo();
-          return;
+        function stopCamera(videoId) {
+            const video = document.getElementById(videoId);
+            if (video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+                video.srcObject = null;
+                video.style.display = 'none';
+            }
         }
-        Quagga.start();
-      });
-      Quagga.onDetected(function(data) {
-        if (data.codeResult && data.codeResult.code) {
-          const code = data.codeResult.code;
-          if (tipo === 'nota' && !notaFiscal) {
-            notaFiscal = code;
-            const canvas = document.createElement('canvas');
-            canvas.width = video.videoWidth;
-            canvas.height = video.videoHeight;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            notaFiscalImage = canvas.toDataURL('image/jpeg');
-            resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            Quagga.stop();
-            focusRect.style.display = 'none';
-            stopVideo();
-            productButtons.style.display = 'flex';
-          }
+
+        async function captureNF() {
+            const video = document.getElementById('video1');
+            if (!stream1) startCamera('video1');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
+            stopCamera('video1');
+            await processNFImage(imageData);
         }
-      });
-    }
 
-    function stopVideo() {
-      const stream = video.srcObject;
-      if (stream) stream.getTracks().forEach(track => track.stop());
-      video.srcObject = null;
-    }
-
-    function startProductScan() {
-      scanInterval = setInterval(async () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        currentProduct.image = canvas.toDataURL('image/jpeg');
-        const result = await Tesseract.recognize(currentProduct.image, 'por', {
-          logger: m => console.log(m),
-          psm: 6 // Texto em linha uniforme
-        });
-        const text = result.data.text.trim();
-        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-        let dataRecognized = false;
-        for (let line of lines) {
-          if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
-            currentProduct.op = line; // OP (6 dígitos, sem "/1")
-            dataRecognized = true;
-          } else if (line.match(/^\d{8}$/) && !currentProduct.code) {
-            currentProduct.code = line.replace(/(\d{2})(\d{2})(\d{2})(\d{4})/, '$1.$2.$3.$4'); // Formata como 00.00.00.0000
-            dataRecognized = true;
-          } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) {
-            currentProduct.date = line.replace(/[-\/]/g, '/'); // Formata como dd/mm/aaaa
-            dataRecognized = true;
-          } else if (line.match(/^\d{7,13}$/) && !currentProduct.barcode) {
-            currentProduct.barcode = line; // Código de barras (7 a 13 dígitos)
-            dataRecognized = true;
-          }
+        async function captureItem() {
+            const video = document.getElementById('video2');
+            if (!stream2) startCamera('video2');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/png');
+            stopCamera('video2');
+            await processItemImage(imageData);
         }
-        if (dataRecognized) {
-          clearInterval(scanInterval);
-          stopVideo();
-          focusRect.style.display = 'none';
-          productData.style.display = 'block';
-          editOp.value = currentProduct.op || '';
-          editCode.value = currentProduct.code || '';
-          editDate.value = currentProduct.date || '';
-          editBarcode.value = currentProduct.barcode || '';
-          saveProductBtn.style.display = 'inline';
+
+        async function processNFImage(imageData) {
+            const resultDiv = document.getElementById('nfResult');
+            resultDiv.innerHTML = 'Processando...';
+            const { data: { text } } = await Tesseract.recognize(imageData, 'por');
+            resultDiv.innerHTML = 'Texto extraído: <pre>' + text + '</pre>';
+
+            // Extrair número da nota fiscal e nome do cliente
+            const nfNumberMatch = text.match(/NF[-e]\s*:\s*(\d+)/i);
+            const clientNameMatch = text.match(/RAZAO SOCIAL[:\s]*([A-Za-z\s]+)/i);
+            nfData = {
+                nfNumber: nfNumberMatch ? nfNumberMatch[1] : 'Não identificado',
+                clientName: clientNameMatch ? clientNameMatch[1].trim() : 'Não identificado'
+            };
+            resultDiv.innerHTML += `<p>Número NF: ${nfData.nfNumber}<br>Nome Cliente: ${nfData.clientName}</p>`;
+            document.getElementById('step1').style.display = 'none';
+            document.getElementById('step2').style.display = 'block';
+            startCamera('video2');
         }
-      }, 1000); // Tenta a cada segundo
-    }
 
-    function saveProduct() {
-      currentProduct.op = editOp.value;
-      currentProduct.code = editCode.value;
-      currentProduct.date = editDate.value;
-      currentProduct.barcode = editBarcode.value;
-      const quantity = loteQuantityInput.value;
-      if (quantity) {
-        currentProduct.lotes.push(parseInt(quantity));
-        products.push({ ...currentProduct });
-        resultDiv.innerHTML = `Produto salvo: OP: ${currentProduct.op}, Código: ${currentProduct.code}, Data: ${currentProduct.date}, Código de Barras: ${currentProduct.barcode}, Quantidade: ${quantity}`;
-        photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
-        photoPreviewDiv.style.display = 'block';
-        productData.style.display = 'none';
-        saveProductBtn.style.display = 'none';
-        actionButtons.style.display = 'flex';
-      } else {
-        alert('Digite a quantidade do lote!');
-      }
-    }
+        async function processItemImage(imageData) {
+            const resultDiv = document.getElementById('itemResult');
+            resultDiv.innerHTML = 'Processando...';
+            const { data: { text } } = await Tesseract.recognize(imageData, 'por');
+            resultDiv.innerHTML = 'Texto extraído: <pre>' + text + '</pre>';
 
-    function showResults() {
-      let totalQuantity = 0;
-      products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
-      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Imagem Nota: <img src="${notaFiscalImage}" style="max-width:200px;"><br>Total Produtos: ${products.length}<br>Total Quantidade: ${totalQuantity}`;
-      productListDiv.innerHTML = '<h3>Produtos Escaneados:</h3>';
-      products.forEach((prod, index) => {
-        productListDiv.innerHTML += `
-          <div class="product-item">
-            <p>OP: ${prod.op}</p>
-            <p>Código: ${prod.code}</p>
-            <p>Data: ${prod.date}</p>
-            <p>Código de Barras: ${prod.barcode}</p>
-            <p>Lotes: ${prod.lotes.join(', ')}</p>
-            <img src="${prod.image}" alt="Foto do produto">
-          </div>
-        `;
-      });
-    }
+            // Extrair OP, data e código do produto
+            const opMatch = text.match(/OP[:\s]*(\d+)/i); // Ex.: 472462
+            const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/); // Ex.: 23/06/2025
+            const productCodeMatch = text.match(/(\d{2}\.\d{2}\.\d{2}\.\d{4})/); // Ex.: 07.21.05.0011
 
-    function sendWhatsApp() {
-      let totalQuantity = 0;
-      products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
-      const message = `Nota Fiscal: ${notaFiscal}\nImagem Nota: ${notaFiscalImage}\nTotal Produtos: ${products.length}\nTotal Quantidade: ${totalQuantity}\nProdutos:\n${products.map(prod => 
-        `OP: ${prod.op}, Código: ${prod.code}, Data: ${prod.date}, Código de Barras: ${prod.barcode}, Lotes: ${prod.lotes.join(', ')}`).join('\n')}`;
-      const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
-      window.open(url, '_blank');
-    }
-  </script>
+            let itemData = {
+                op: opMatch ? opMatch[1] : 'Não identificado',
+                date: dateMatch ? dateMatch[1] : 'Não identificado',
+                productCode: productCodeMatch ? productCodeMatch[1] : 'Não identificado',
+                quantity: prompt('Digite a quantidade para esta OP:') || 0
+            };
+            items.push(itemData);
+            resultDiv.innerHTML += `<p>OP: ${itemData.op}<br>Data: ${itemData.date}<br>Código: ${itemData.productCode}<br>Quantidade: ${itemData.quantity}</p>`;
+        }
+
+        function finalize() {
+            stopCamera('video2');
+            const dataDiv = document.getElementById('data');
+            let finalData = `Nota Fiscal: ${nfData.nfNumber}\nCliente: ${nfData.clientName}\nItens:\n`;
+            items.forEach((item, index) => {
+                finalData += `Item ${index + 1}: OP ${item.op}, Data ${item.date}, Código ${item.productCode}, Quantidade ${item.quantity}\n`;
+            });
+            dataDiv.innerHTML = `<pre>${finalData}</pre>`;
+            window.finalText = finalData;
+            document.getElementById('sendBtn').style.display = 'block';
+            document.getElementById('step2').style.display = 'none';
+        }
+
+        function sendWhatsApp() {
+            const text = window.finalText || 'Nenhum dado para enviar.';
+            window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
+        }
+
+        // Iniciar com a câmera da nota fiscal
+        window.onload = () => startCamera('video1');
+    </script>
 </body>
 </html>
