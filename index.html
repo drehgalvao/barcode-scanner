@@ -41,6 +41,33 @@
       font-size: 18px;
       color: #333;
     }
+    #itemList {
+      margin: 20px 0;
+      text-align: left;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    .item {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      margin-bottom: 5px;
+    }
+    .remove-btn {
+      background-color: #dc3545;
+      color: white;
+      border: none;
+      padding: 5px 10px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .remove-btn:hover {
+      background-color: #c82333;
+    }
     button {
       margin: 10px;
       padding: 12px 24px;
@@ -71,23 +98,25 @@
     <div id="focusRect"></div>
   </div>
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
-  <button onclick="startScan('produto')">Escanear Produto</button>
+  <button onclick="startScan('produto')">Escanear Primeiro Produto</button>
+  <button onclick="startScan('item')">Adicionar Item</button>
   <input type="number" id="quantidade" placeholder="Quantidade do lote" min="1">
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
+  <div id="itemList"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
   <script>
     let notaFiscal = '';
-    let produto = '';
-    let quantidade = '';
+    let items = [];
+    let extractedText = '';
     const video = document.getElementById('video');
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
+    const itemListDiv = document.getElementById('itemList');
     let barcodeDetector = null;
-    let extractedText = '';
 
     // Verifica suporte à Barcode Detection API
     window.addEventListener('load', () => {
@@ -102,7 +131,7 @@
     });
 
     async function startScan(tipo) {
-      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte o código para o retângulo.`;
+      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : tipo === 'produto' ? 'Primeiro Produto' : 'Item'}... Aponte o código para o retângulo.`;
       focusRect.style.display = 'block';
 
       try {
@@ -121,7 +150,6 @@
         video.srcObject = stream;
         video.play();
 
-        // Extrair texto com OCR
         await extractTextFromVideo(tipo);
 
         if (barcodeDetector) {
@@ -156,19 +184,17 @@
         extractedText = result.data.text.trim();
         console.log('Texto extraído:', extractedText);
 
-        // Tentar identificar campos específicos (exemplo básico)
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
         for (let line of lines) {
           if (line.includes('CNPJ') && !notaFiscal && tipo === 'nota') {
             notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
-          } else if (line.includes('UN') && !quantidade && tipo === 'nota') {
-            quantidade = line.replace(/[^\d]/g, '');
-          } else if (line.includes('GATILHO') && !produto && tipo === 'produto') {
-            produto = line;
+          } else if (line.match(/(\d+)\s*UN/i) && tipo === 'nota') {
+            let qty = line.match(/(\d+)\s*UN/i)[1];
+            if (!quantidade) quantidade = qty;
           }
         }
 
-        if (!notaFiscal || !produto || !quantidade) {
+        if (!notaFiscal && tipo === 'nota') {
           attempts++;
           requestAnimationFrame(captureFrame);
         }
@@ -190,16 +216,25 @@
           const barcodes = await barcodeDetector.detect(video);
           if (barcodes && barcodes.length > 0) {
             const code = barcodes[0].rawValue;
+            let processedCode = code;
+            if (tipo === 'nota' && code.length >= 34) {
+              processedCode = code.substring(30, 34); // Extrai caracteres 31 a 34
+            }
             if (tipo === 'nota' && !notaFiscal) {
-              notaFiscal = code;
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
-            } else if (tipo === 'produto' && !produto) {
-              produto = code;
-              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
+              notaFiscal = processedCode;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
+            } else if ((tipo === 'produto' || tipo === 'item') && code) {
+              const qtyInput = prompt(`Digite a quantidade para o item ${code}:`, '1');
+              const qty = qtyInput ? parseInt(qtyInput) : 1;
+              if (!isNaN(qty) && qty > 0) {
+                items.push({ code, quantity: qty });
+                updateItemList();
+                resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+              }
             }
             stopVideo();
             focusRect.style.display = 'none';
-            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Item'} escaneado: ${processedCode}`);
           } else {
             attempts++;
             requestAnimationFrame(scanFrame);
@@ -250,16 +285,25 @@
         Quagga.onDetected(function(data) {
           if (data && data.codeResult && data.codeResult.code) {
             const code = data.codeResult.code;
+            let processedCode = code;
+            if (tipo === 'nota' && code.length >= 34) {
+              processedCode = code.substring(30, 34); // Extrai caracteres 31 a 34
+            }
             if (tipo === 'nota' && !notaFiscal) {
-              notaFiscal = code;
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
-            } else if (tipo === 'produto' && !produto) {
-              produto = code;
-              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
+              notaFiscal = processedCode;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
+            } else if ((tipo === 'produto' || tipo === 'item') && code) {
+              const qtyInput = prompt(`Digite a quantidade para o item ${code}:`, '1');
+              const qty = qtyInput ? parseInt(qtyInput) : 1;
+              if (!isNaN(qty) && qty > 0) {
+                items.push({ code, quantity: qty });
+                updateItemList();
+                resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+              }
             }
             Quagga.stop();
             focusRect.style.display = 'none';
-            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Item'} escaneado: ${processedCode}`);
             stopVideo();
           }
         });
@@ -279,23 +323,56 @@
       }
     }
 
+    function updateItemList() {
+      itemListDiv.innerHTML = '';
+      items.forEach((item, index) => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `Item ${index + 1}: ${item.code} - Quantidade: ${item.quantity} <button class="remove-btn" onclick="removeItem(${index})">Remover</button>`;
+        itemListDiv.appendChild(div);
+      });
+    }
+
+    function removeItem(index) {
+      items.splice(index, 1);
+      updateItemList();
+      resultDiv.innerHTML = `Item removido. Total de itens: ${items.length}.`;
+    }
+
     function showResults() {
       quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && produto && quantidade) {
-        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}<br>Texto extraído: ${extractedText}`;
+      if (notaFiscal && (items.length > 0 || produto) && quantidade) {
+        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade}<br>Texto extraído: ${extractedText}<br>Itens:`;
+        if (items.length > 0) {
+          resultText += '<ul>';
+          items.forEach(item => {
+            resultText += `<li>${item.code} - ${item.quantity} unidades</li>`;
+          });
+          resultText += '</ul>';
+        } else if (produto) {
+          resultText += `<br>Produto: ${produto}`;
+        }
+        resultDiv.innerHTML = resultText;
       } else {
-        resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
+        resultDiv.innerHTML = 'Escaneie a Nota Fiscal e pelo menos um item, e informe a quantidade!';
       }
     }
 
     function sendWhatsApp() {
       quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && produto && quantidade) {
-        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}\nTexto extraído: ${extractedText}`;
+      if (notaFiscal && (items.length > 0 || produto) && quantidade) {
+        let message = `Nota Fiscal: ${notaFiscal}\nQuantidade Total: ${quantidade}\nTexto extraído: ${extractedText}\nItens:`;
+        if (items.length > 0) {
+          items.forEach(item => {
+            message += `\n- ${item.code} - ${item.quantity} unidades`;
+          });
+        } else if (produto) {
+          message += `\n- ${produto}`;
+        }
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
-        alert('Preencha todas as informações antes de enviar!');
+        alert('Escaneie a Nota Fiscal e pelo menos um item, e informe a quantidade!');
       }
     }
   </script>
