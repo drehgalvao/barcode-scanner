@@ -13,21 +13,22 @@
       padding: 10px;
       background-color: #f0f0f0;
     }
+    #container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
     #scanArea {
       position: relative;
-      display: inline-block;
-      width: 100%;
-      max-width: 600px;
+      margin: 20px 0;
     }
     video {
       width: 100%;
-      max-width: 600px;
-      border: 3px solid #333;
-      border-radius: 8px;
+      border: 2px solid #333;
+      border-radius: 5px;
     }
     #focusRect {
       position: absolute;
-      border: 3px dashed #ff0000;
+      border: 2px dashed #ff0000;
       width: 90%;
       height: 250px;
       top: 50%;
@@ -36,15 +37,16 @@
       display: none;
       pointer-events: none;
     }
-    #result {
-      margin: 20px 0;
-      font-size: 18px;
-      color: #333;
+    .button-group {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 10px;
+      margin: 10px 0;
     }
     button {
-      margin: 10px;
-      padding: 12px 24px;
-      font-size: 16px;
+      padding: 10px 20px;
+      font-size: 14px;
       background-color: #007bff;
       color: white;
       border: none;
@@ -55,18 +57,16 @@
       background-color: #0056b3;
     }
     input {
-      padding: 10px;
-      font-size: 16px;
-      width: 150px;
-      margin: 10px;
+      padding: 8px;
+      font-size: 14px;
+      width: 120px;
+      margin: 5px;
       border: 2px solid #333;
       border-radius: 5px;
     }
-    #fileInput {
-      display: none;
-    }
     #productList {
       margin-top: 20px;
+      text-align: left;
     }
     .product-item {
       margin: 10px 0;
@@ -74,39 +74,69 @@
       background-color: #fff;
       border: 1px solid #ddd;
       border-radius: 5px;
-      text-align: left;
     }
     img {
       max-width: 200px;
       margin-top: 10px;
     }
     #photoPreview {
+      margin: 10px 0;
+    }
+    #fileInput {
       display: none;
-      margin-top: 10px;
+    }
+    @media (max-width: 400px) {
+      button {
+        width: 100%;
+        margin: 5px 0;
+      }
+      input {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
-  <h2>Escaneie os Códigos</h2>
-  <div id="scanArea">
-    <video id="video" autoplay muted playsinline></video>
-    <div id="focusRect"></div>
+  <div id="container">
+    <h2>Leitura de Códigos</h2>
+    <div id="scanArea">
+      <video id="video" autoplay muted playsinline></video>
+      <div id="focusRect"></div>
+    </div>
+    <div class="button-group" id="notaButtons">
+      <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+      <button id="newNote" style="display:none;">Nova Nota</button>
+    </div>
+    <div class="button-group" id="productButtons" style="display:none;">
+      <button onclick="startScan('produto')">Escanear Produto</button>
+      <button id="addProduct" style="display:none;">Incluir Outro Produto</button>
+    </div>
+    <div class="button-group" id="photoButtons" style="display:none;">
+      <input type="file" id="fileInput" accept="image/*" capture="camera" onchange="handleFileUpload()">
+      <button id="takePhoto" style="display:none;">Tirar Foto</button>
+      <button id="confirmPhoto" style="display:none;">Confirmar</button>
+      <button id="retakePhoto" style="display:none;">Tirar Outra Foto</button>
+    </div>
+    <div class="button-group" id="loteButtons" style="display:none;">
+      <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1">
+      <button id="saveLote" style="display:none;">Salvar Quantidade</button>
+    </div>
+    <div class="button-group" id="actionButtons" style="display:none;">
+      <button onclick="showResults()">Mostrar Resultados</button>
+      <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
+    </div>
+    <div id="result">Aguardando escaneamento...</div>
+    <div id="productList"></div>
+    <div id="photoPreview"></div>
+    <div id="manualFields" style="display:none;">
+      <input type="text" id="manualCode" placeholder="Código" style="display:none;">
+      <input type="text" id="manualInternalCode" placeholder="Código Interno" style="display:none;">
+      <input type="text" id="manualDescription" placeholder="Descrição" style="display:none;">
+      <input type="text" id="manualDate" placeholder="Data" style="display:none;">
+      <input type="text" id="manualOp" placeholder="OP" style="display:none;">
+      <button id="saveManual" style="display:none;" onclick="saveManualData()">Salvar Manual</button>
+    </div>
   </div>
-  <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
-  <button id="newNote" style="display:none;" onclick="newNote()">Nova Nota</button>
-  <button onclick="startScan('produto')">Escanear Produto</button>
-  <button id="addProduct" style="display:none;" onclick="startScan('produto')">Incluir Outro Produto</button>
-  <input type="file" id="fileInput" accept="image/*" capture="camera" onchange="handleFileUpload()">
-  <button id="takePhoto" style="display:none;" onclick="document.getElementById('fileInput').click()">Tirar Foto</button>
-  <button id="confirmPhoto" style="display:none;" onclick="confirmProductPhoto()">Confirmar</button>
-  <button id="retakePhoto" style="display:none;" onclick="retakeProductPhoto()">Tirar Outra Foto</button>
-  <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1" style="display:none;">
-  <button id="saveLote" style="display:none;" onclick="saveLote()">Salvar Quantidade</button>
-  <button onclick="showResults()">Mostrar Resultados</button>
-  <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
-  <div id="result">Aguardando escaneamento...</div>
-  <div id="productList"></div>
-  <div id="photoPreview"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
@@ -118,8 +148,11 @@
     const video = document.getElementById('video');
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
-    const addProductBtn = document.getElementById('addProduct');
-    const newNoteBtn = document.getElementById('newNote');
+    const notaButtons = document.getElementById('notaButtons');
+    const productButtons = document.getElementById('productButtons');
+    const photoButtons = document.getElementById('photoButtons');
+    const loteButtons = document.getElementById('loteButtons');
+    const actionButtons = document.getElementById('actionButtons');
     const takePhotoBtn = document.getElementById('takePhoto');
     const confirmPhotoBtn = document.getElementById('confirmPhoto');
     const retakePhotoBtn = document.getElementById('retakePhoto');
@@ -128,9 +161,15 @@
     const productListDiv = document.getElementById('productList');
     const photoPreviewDiv = document.getElementById('photoPreview');
     const fileInput = document.getElementById('fileInput');
+    const manualFields = document.getElementById('manualFields');
+    const manualCode = document.getElementById('manualCode');
+    const manualInternalCode = document.getElementById('manualInternalCode');
+    const manualDescription = document.getElementById('manualDescription');
+    const manualDate = document.getElementById('manualDate');
+    const manualOp = document.getElementById('manualOp');
+    const saveManualBtn = document.getElementById('saveManual');
     let barcodeDetector = null;
 
-    // Verifica suporte à Barcode Detection API
     window.addEventListener('load', () => {
       if ('BarcodeDetector' in window) {
         barcodeDetector = new BarcodeDetector({
@@ -149,12 +188,7 @@
       if (tipo === 'nota') {
         try {
           const constraints = {
-            video: { 
-              facingMode: { ideal: 'environment' }, 
-              width: { ideal: 1280 }, 
-              height: { ideal: 720 },
-              focusMode: 'continuous'
-            }
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
           };
           const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
             return await navigator.mediaDevices.getUserMedia({
@@ -163,19 +197,18 @@
           });
           video.srcObject = stream;
           video.play();
-
-          if (barcodeDetector) {
-            await scanWithBarcodeDetector(tipo);
-          } else {
-            await scanWithQuagga(tipo);
-          }
+          if (barcodeDetector) await scanWithBarcodeDetector(tipo);
+          else await scanWithQuagga(tipo);
         } catch (err) {
           resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
-          console.error('Erro ao iniciar câmera:', err);
+          console.error('Erro:', err);
           focusRect.style.display = 'none';
         }
       } else if (tipo === 'produto') {
         currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+        notaButtons.style.display = 'none';
+        productButtons.style.display = 'none';
+        photoButtons.style.display = 'flex';
         takePhotoBtn.style.display = 'inline';
       }
     }
@@ -188,12 +221,12 @@
           resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
           stopVideo();
           focusRect.style.display = 'none';
-          newNoteBtn.style.display = 'inline-block';
+          document.getElementById('newNote').style.display = 'inline';
           return;
         }
         try {
           const barcodes = await barcodeDetector.detect(video);
-          if (barcodes && barcodes.length > 0) {
+          if (barcodes.length > 0) {
             const code = barcodes[0].rawValue;
             if (tipo === 'nota' && !notaFiscal) {
               notaFiscal = code;
@@ -207,8 +240,8 @@
             }
             stopVideo();
             focusRect.style.display = 'none';
-            newNoteBtn.style.display = 'inline-block';
-            addProductBtn.style.display = 'inline-block';
+            document.getElementById('newNote').style.display = 'inline';
+            productButtons.style.display = 'flex';
             console.log(`Código detectado (${tipo}):`, code);
             alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
           } else {
@@ -216,7 +249,7 @@
             requestAnimationFrame(scanFrame);
           }
         } catch (err) {
-          console.error('Erro na detecção de código de barras:', err);
+          console.error('Erro:', err);
           attempts++;
           requestAnimationFrame(scanFrame);
         }
@@ -225,69 +258,50 @@
     }
 
     function scanWithQuagga(tipo) {
-      try {
-        Quagga.init({
-          inputStream: {
-            name: 'Live',
-            type: 'LiveStream',
-            target: video,
-            constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' },
-            area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
-            singleChannel: false
-          },
-          decoder: {
-            readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader', 'code_39_reader', 'code_93_reader', 'codabar_reader']
-          },
-          locator: { patchSize: 'medium', halfSample: true },
-          numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2),
-          locate: true
-        }, function(err) {
-          if (err) {
-            resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar a página.';
-            console.error('Erro QuaggaJS:', err);
-            focusRect.style.display = 'none';
-            stopVideo();
-            return;
+      Quagga.init({
+        inputStream: { name: 'Live', type: 'LiveStream', target: video, constraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }, area: { top: '10%', right: '5%', left: '5%', bottom: '10%' }, singleChannel: false },
+        decoder: { readers: ['code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader', 'code_39_reader', 'code_93_reader', 'codabar_reader'] },
+        locator: { patchSize: 'medium', halfSample: true },
+        numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2),
+        locate: true
+      }, function(err) {
+        if (err) {
+          resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar.';
+          console.error('Erro:', err);
+          focusRect.style.display = 'none';
+          stopVideo();
+          return;
+        }
+        Quagga.start();
+      });
+      Quagga.onDetected(function(data) {
+        if (data.codeResult && data.codeResult.code) {
+          const code = data.codeResult.code;
+          if (tipo === 'nota' && !notaFiscal) {
+            notaFiscal = code;
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            notaFiscalImage = canvas.toDataURL('image/jpeg');
+            resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
           }
-          Quagga.start();
-        });
-
-        Quagga.onDetected(function(data) {
-          if (data && data.codeResult && data.codeResult.code) {
-            const code = data.codeResult.code;
-            if (tipo === 'nota' && !notaFiscal) {
-              notaFiscal = code;
-              const canvas = document.createElement('canvas');
-              canvas.width = video.videoWidth;
-              canvas.height = video.videoHeight;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-              notaFiscalImage = canvas.toDataURL('image/jpeg');
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-            }
-            Quagga.stop();
-            focusRect.style.display = 'none';
-            newNoteBtn.style.display = 'inline-block';
-            addProductBtn.style.display = 'inline-block';
-            console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
-            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
-            stopVideo();
-          }
-        });
-      } catch (err) {
-        resultDiv.innerHTML = 'Erro ao configurar QuaggaJS. Tente novamente.';
-        console.error('Erro QuaggaJS:', err);
-        focusRect.style.display = 'none';
-        stopVideo();
-      }
+          Quagga.stop();
+          focusRect.style.display = 'none';
+          document.getElementById('newNote').style.display = 'inline';
+          productButtons.style.display = 'flex';
+          console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
+          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+          stopVideo();
+        }
+      });
     }
 
     function stopVideo() {
       const stream = video.srcObject;
-      if (stream) {
-        stream.getTracks().forEach(track => track.stop());
-        video.srcObject = null;
-      }
+      if (stream) stream.getTracks().forEach(track => track.stop());
+      video.srcObject = null;
     }
 
     function newNote() {
@@ -296,8 +310,9 @@
       products = [];
       resultDiv.innerHTML = 'Nova nota iniciada. Escaneie a Nota Fiscal novamente.';
       productListDiv.innerHTML = '';
-      newNoteBtn.style.display = 'none';
-      addProductBtn.style.display = 'none';
+      document.getElementById('newNote').style.display = 'none';
+      productButtons.style.display = 'none';
+      notaButtons.style.display = 'flex';
     }
 
     function handleFileUpload() {
@@ -309,7 +324,7 @@
           photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
           photoPreviewDiv.style.display = 'block';
           takePhotoBtn.style.display = 'none';
-          fileInput.value = ''; // Limpa o input para novos uploads
+          fileInput.value = '';
           confirmPhotoBtn.style.display = 'inline';
           retakePhotoBtn.style.display = 'inline';
         };
@@ -321,38 +336,49 @@
       photoPreviewDiv.style.display = 'block';
       confirmPhotoBtn.style.display = 'none';
       retakePhotoBtn.style.display = 'none';
+      photoButtons.style.display = 'none';
 
-      // Extração de informações com OCR otimizado
       const result = await Tesseract.recognize(currentProduct.image, 'por', {
         logger: m => console.log(m),
-        psm: 11 // Texto esparso, mais adequado para layouts variados
+        psm: 7 // Texto sem layout fixo
       });
       const text = result.data.text.trim();
-      console.log('Texto bruto extraído da foto:', text); // Log detalhado
+      console.log('Texto bruto extraído:', text);
       const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      console.log('Linhas processadas:', lines); // Log das linhas
+      console.log('Linhas processadas:', lines);
       let dataRecognized = false;
       for (let line of lines) {
-        if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/) && !currentProduct.internalCode) {
-          currentProduct.internalCode = line; // Código interno (ex.: 00.00.00.0000)
+        if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$|^\d{8}$/) && !currentProduct.internalCode) {
+          currentProduct.internalCode = line; // Código interno (00.00.00.0000 ou 00000000)
           dataRecognized = true;
-        } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) { // Código de barras (7 a 13 dígitos, mais restritivo)
-          currentProduct.code = line;
+        } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) {
+          currentProduct.code = line; // Código de barras (7 a 13 dígitos)
           dataRecognized = true;
-        } else if (line.match(/GATILHO/i) && !currentProduct.description) { // Descrição com "GATILHO"
-          currentProduct.description = line.replace(/GATILHO/i, '').trim() || line; // Remove "GATILHO" se presente
+        } else if (line.match(/GATILHO/i) && !currentProduct.description) {
+          currentProduct.description = line.replace(/GATILHO/i, '').trim() || line;
           dataRecognized = true;
-        } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) { // Data (dd-mm-yyyy ou dd/mm/yyyy)
-          currentProduct.date = line;
+        } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) {
+          currentProduct.date = line; // Data (dd-mm-yyyy ou dd/mm/yyyy)
           dataRecognized = true;
-        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) { // OP (6 dígitos, sem "/1")
-          currentProduct.op = line;
+        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
+          currentProduct.op = line; // OP (6 dígitos, sem "/1")
           dataRecognized = true;
         }
       }
       if (!dataRecognized) {
-        resultDiv.innerHTML = 'Nenhum dado reconhecido. Verifique se a etiqueta contém os campos esperados (Código interno, Descrição com "GATILHO", Data, OP) e tire outra foto.';
-        retakePhotoBtn.style.display = 'inline';
+        resultDiv.innerHTML = 'Nenhum dado reconhecido. Verifique a etiqueta e edite manualmente, se necessário.';
+        manualCode.value = currentProduct.code || '';
+        manualInternalCode.value = currentProduct.internalCode || '';
+        manualDescription.value = currentProduct.description || '';
+        manualDate.value = currentProduct.date || '';
+        manualOp.value = currentProduct.op || '';
+        manualFields.style.display = 'block';
+        manualCode.style.display = 'inline';
+        manualInternalCode.style.display = 'inline';
+        manualDescription.style.display = 'inline';
+        manualDate.style.display = 'inline';
+        manualOp.style.display = 'inline';
+        saveManualBtn.style.display = 'inline';
         return;
       }
       resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
@@ -368,7 +394,7 @@
     }
 
     function showLoteInput() {
-      loteQuantityInput.style.display = 'inline';
+      loteButtons.style.display = 'flex';
       saveLoteBtn.style.display = 'inline';
       resultDiv.innerHTML += '\nDigite a quantidade do lote e clique em Salvar.';
     }
@@ -379,15 +405,32 @@
         currentProduct.lotes.push(parseInt(quantity));
         products.push({ ...currentProduct });
         resultDiv.innerHTML = `Lote salvo para ${currentProduct.code || 'Produto'}. Quantidade: ${quantity}`;
-        loteQuantityInput.style.display = 'none';
-        saveLoteBtn.style.display = 'none';
+        loteButtons.style.display = 'none';
         photoPreviewDiv.style.display = 'none';
         currentProduct = null;
         updateProductList();
-        addProductBtn.style.display = 'inline-block';
+        productButtons.style.display = 'flex';
+        actionButtons.style.display = 'flex';
       } else {
         alert('Confirme a foto e digite uma quantidade válida!');
       }
+    }
+
+    function saveManualData() {
+      currentProduct.code = manualCode.value || currentProduct.code;
+      currentProduct.internalCode = manualInternalCode.value || currentProduct.internalCode;
+      currentProduct.description = manualDescription.value || currentProduct.description;
+      currentProduct.date = manualDate.value || currentProduct.date;
+      currentProduct.op = manualOp.value || currentProduct.op;
+      manualFields.style.display = 'none';
+      manualCode.style.display = 'none';
+      manualInternalCode.style.display = 'none';
+      manualDescription.style.display = 'none';
+      manualDate.style.display = 'none';
+      manualOp.style.display = 'none';
+      saveManualBtn.style.display = 'none';
+      resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
+      showLoteInput();
     }
 
     function updateProductList() {
