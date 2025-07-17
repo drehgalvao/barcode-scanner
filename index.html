@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Processador de NF e Itens via Câmera</title>
+    <title>Processador de NF e Itens via Câmera Traseira</title>
     <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.0/dist/tesseract.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
@@ -48,13 +48,15 @@
         async function startCamera(videoId) {
             const video = document.getElementById(videoId);
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' } // Tenta forçar câmera traseira
+                });
                 video.srcObject = stream;
                 video.style.display = 'block';
                 if (videoId === 'video1') stream1 = stream;
                 else stream2 = stream;
             } catch (err) {
-                alert('Erro ao acessar a câmera: ' + err.message);
+                alert('Erro ao acessar a câmera traseira: ' + err.message + '. Verifique as permissões ou tente novamente.');
             }
         }
 
@@ -69,7 +71,7 @@
 
         async function captureNF() {
             const video = document.getElementById('video1');
-            if (!stream1) startCamera('video1');
+            if (!stream1) await startCamera('video1');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             const imageData = canvas.toDataURL('image/png');
             stopCamera('video1');
@@ -78,7 +80,7 @@
 
         async function captureItem() {
             const video = document.getElementById('video2');
-            if (!stream2) startCamera('video2');
+            if (!stream2) await startCamera('video2');
             context.drawImage(video, 0, 0, canvas.width, canvas.height);
             const imageData = canvas.toDataURL('image/png');
             stopCamera('video2');
@@ -143,7 +145,7 @@
             window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
         }
 
-        // Iniciar com a câmera da nota fiscal
+        // Iniciar com a câmera traseira da nota fiscal
         window.onload = () => startCamera('video1');
     </script>
 </body>
