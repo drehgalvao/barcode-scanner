@@ -340,7 +340,7 @@
 
       const result = await Tesseract.recognize(currentProduct.image, 'por', {
         logger: m => console.log(m),
-        psm: 7 // Texto sem layout fixo
+        psm: 6 // Texto em linha uniforme
       });
       const text = result.data.text.trim();
       console.log('Texto bruto extraído:', text);
