@@ -150,7 +150,7 @@
         focusRect.style.display = 'none';
         return;
       }
-      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : tipo === 'produto' ? 'Primeiro Produto' : 'Item'}... Aponte o código para o retângulo.`;
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : tipo === 'produto' ? 'Primeiro Produto' : 'Item'}... Aponte o código para o retângulo.`;
       focusRect.style.display = 'block';
 
       try {
@@ -177,7 +177,7 @@
           await scanWithQuagga(tipo);
         }
       } catch (err) {
-        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Erro ao acessar a câmera. Verifique permissões ou use HTTPS.`;
         console.error('Erro ao iniciar câmera:', err);
         focusRect.style.display = 'none';
       }
@@ -204,12 +204,14 @@
         console.log('Texto extraído:', extractedText);
 
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
-        for (let line of lines) {
-          if (line.includes('CNPJ') && !notaFiscal && tipo === 'nota') {
-            notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
-          } else if (line.match(/(\d+)\s*UN/i) && tipo === 'nota') {
-            let qty = line.match(/(\d+)\s*UN/i)[1];
-            if (!quantidade) quantidade = qty;
+        if (tipo === 'nota') {
+          for (let line of lines) {
+            if (line.includes('CNPJ') && !notaFiscal) {
+              notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
+            } else if (line.match(/(\d+)\s*UN/i)) {
+              let qty = line.match(/(\d+)\s*UN/i)[1];
+              if (!quantidade) quantidade = qty;
+            }
           }
         }
 
@@ -226,7 +228,7 @@
       const maxAttempts = 100;
       async function scanFrame() {
         if (attempts >= maxAttempts) {
-          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
+          resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Não foi possível ler o código. Tente novamente.`;
           stopVideo();
           focusRect.style.display = 'none';
           return;
@@ -242,7 +244,7 @@
             if (tipo === 'nota') {
               notaFiscal = processedCode;
               console.log('Nota Fiscal salva:', notaFiscal);
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
+              resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal} (caracteres 31-34 de ${code})<br>Texto extraído: ${extractedText}`;
               updateButtonStates();
             } else if ((tipo === 'produto' || tipo === 'item') && code) {
               const qtyInput = prompt(`Digite a quantidade para o item ${code}:`, '1');
@@ -250,7 +252,7 @@
               if (!isNaN(qty) && qty > 0) {
                 items.push({ code, quantity: qty });
                 updateItemList();
-                resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item ${code} adicionado com ${qty} unidades.<br>Texto extraído: ${extractedText}`;
                 updateButtonStates();
               }
             }
@@ -353,7 +355,7 @@
       items.forEach((item, index) => {
         const div = document.createElement('div');
         div.className = 'item';
-        div.innerHTML = `Item ${index + 1}: ${item.code} - Quantidade: ${item.quantity} <button class=\"remove-btn\" onclick=\"removeItem(${index})\">Remover</button>`;
+        div.innerHTML = `Item ${index + 1}: ${item.code} - Quantidade: ${item.quantity} <button class="remove-btn" onclick="removeItem(${index})">Remover</button>`;
         itemListDiv.appendChild(div);
       });
     }
@@ -361,7 +363,7 @@
     function removeItem(index) {
       items.splice(index, 1);
       updateItemList();
-      resultDiv.innerHTML = `Item removido. Total de itens: ${items.length}.`;
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item removido. Total de itens: ${items.length}.`;
       updateButtonStates();
     }
 
@@ -377,7 +379,7 @@
         resultText += '</ul>';
         resultDiv.innerHTML = resultText;
       } else {
-        resultDiv.innerHTML = 'Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!';
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!`;
       }
     }
 
@@ -391,7 +393,7 @@
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
-        alert('Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!');
+        alert(`Nota Fiscal: ${notaFiscal || 'Não escaneada'}\nEscaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!`);
       }
     }
   </script>
