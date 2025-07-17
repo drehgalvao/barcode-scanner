@@ -239,8 +239,9 @@
             if (tipo === 'nota' && code.length >= 34) {
               processedCode = code.substring(30, 34); // Extrai caracteres 31 a 34
             }
-            if (tipo === 'nota' && !notaFiscal) {
+            if (tipo === 'nota') {
               notaFiscal = processedCode;
+              console.log('Nota Fiscal salva:', notaFiscal);
               resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
               updateButtonStates();
             } else if ((tipo === 'produto' || tipo === 'item') && code) {
@@ -310,8 +311,9 @@
             if (tipo === 'nota' && code.length >= 34) {
               processedCode = code.substring(30, 34); // Extrai caracteres 31 a 34
             }
-            if (tipo === 'nota' && !notaFiscal) {
+            if (tipo === 'nota') {
               notaFiscal = processedCode;
+              console.log('Nota Fiscal salva:', notaFiscal);
               resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
               updateButtonStates();
             } else if ((tipo === 'produto' || tipo === 'item') && code) {
