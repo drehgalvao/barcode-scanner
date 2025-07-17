@@ -369,17 +369,24 @@
 
     function showResults() {
       console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'quantidade:', quantidade);
-      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && (items.length > 0) && quantidade) {
-        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade || 'Não informada'}<br>Texto extraído: ${extractedText}<br>Itens:`;
-        resultText += '<ul>';
-        items.forEach(item => {
-          resultText += `<li>${item.code} - ${item.quantity} unidades</li>`;
-        });
-        resultText += '</ul>';
+      const quantidadeInput = document.getElementById('quantidade').value;
+      const quantidadeExtrada = extractedText.match(/(\d+)\s*UN/i) ? extractedText.match(/(\d+)\s*UN/i)[1] : null;
+      let quantidade = quantidadeInput || quantidadeExtrada || '';
+
+      if (notaFiscal) {
+        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade || 'Não informada'}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}`;
+        if (items.length > 0) {
+          resultText += '<br>Itens:<ul>';
+          items.forEach(item => {
+            resultText += `<li>${item.code} - ${item.quantity} unidades</li>`;
+          });
+          resultText += '</ul>';
+        } else {
+          resultText += '<br>Itens: Nenhum item registrado';
+        }
         resultDiv.innerHTML = resultText;
       } else {
-        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!`;
+        resultDiv.innerHTML = 'Nota Fiscal não escaneada. Escaneie a Nota Fiscal primeiro!';
       }
     }
 
