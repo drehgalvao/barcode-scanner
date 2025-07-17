@@ -105,7 +105,7 @@
   <button id="produtoBtn" onclick="startScan('produto')" disabled>Escanear Primeiro Produto</button>
   <button id="itemBtn" onclick="startScan('item')" disabled>Adicionar Item</button>
   <input type="number" id="quantidade" placeholder="Quantidade do lote" min="1">
-  <button onclick="showResults()">Mostrar Resultados</button>
+  <button id="showResultsBtn" onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
   <div id="itemList"></div>
@@ -123,6 +123,7 @@
     const notaBtn = document.getElementById('notaBtn');
     const produtoBtn = document.getElementById('produtoBtn');
     const itemBtn = document.getElementById('itemBtn');
+    const showResultsBtn = document.getElementById('showResultsBtn');
     let barcodeDetector = null;
 
     // Verifica suporte à Barcode Detection API
@@ -140,6 +141,7 @@
     function updateButtonStates() {
       produtoBtn.disabled = !notaFiscal;
       itemBtn.disabled = !notaFiscal;
+      showResultsBtn.disabled = !notaFiscal || items.length === 0;
     }
 
     async function startScan(tipo) {
@@ -248,6 +250,7 @@
                 items.push({ code, quantity: qty });
                 updateItemList();
                 resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+                updateButtonStates();
               }
             }
             stopVideo();
@@ -318,6 +321,7 @@
                 items.push({ code, quantity: qty });
                 updateItemList();
                 resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+                updateButtonStates();
               }
             }
             Quagga.stop();
@@ -356,42 +360,36 @@
       items.splice(index, 1);
       updateItemList();
       resultDiv.innerHTML = `Item removido. Total de itens: ${items.length}.`;
+      updateButtonStates();
     }
 
     function showResults() {
+      console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'quantidade:', quantidade);
       quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && (items.length > 0 || produto) && quantidade) {
-        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade}<br>Texto extraído: ${extractedText}<br>Itens:`;
-        if (items.length > 0) {
-          resultText += '<ul>';
-          items.forEach(item => {
-            resultText += `<li>${item.code} - ${item.quantity} unidades</li>`;
-          });
-          resultText += '</ul>';
-        } else if (produto) {
-          resultText += `<br>Produto: ${produto}`;
-        }
+      if (notaFiscal && (items.length > 0) && quantidade) {
+        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade || 'Não informada'}<br>Texto extraído: ${extractedText}<br>Itens:`;
+        resultText += '<ul>';
+        items.forEach(item => {
+          resultText += `<li>${item.code} - ${item.quantity} unidades</li>`;
+        });
+        resultText += '</ul>';
         resultDiv.innerHTML = resultText;
       } else {
-        resultDiv.innerHTML = 'Escaneie a Nota Fiscal e pelo menos um item, e informe a quantidade!';
+        resultDiv.innerHTML = 'Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!';
       }
     }
 
     function sendWhatsApp() {
       quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && (items.length > 0 || produto) && quantidade) {
+      if (notaFiscal && (items.length > 0) && quantidade) {
         let message = `Nota Fiscal: ${notaFiscal}\nQuantidade Total: ${quantidade}\nTexto extraído: ${extractedText}\nItens:`;
-        if (items.length > 0) {
-          items.forEach(item => {
-            message += `\n- ${item.code} - ${item.quantity} unidades`;
-          });
-        } else if (produto) {
-          message += `\n- ${produto}`;
-        }
+        items.forEach(item => {
+          message += `\n- ${item.code} - ${item.quantity} unidades`;
+        });
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
-        alert('Escaneie a Nota Fiscal e pelo menos um item, e informe a quantidade!');
+        alert('Escaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!');
       }
     }
   </script>
