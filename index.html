@@ -6,138 +6,292 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Leitura de Códigos de Barras</title>
   <style>
-    body { font-family: Arial, sans-serif; text-align: center; }
-    video { width: 100%; max-width: 500px; border: 2px solid #333; }
-    canvas { display: none; }
-    #result { margin-top: 20px; font-size: 16px; }
-    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
-    input { padding: 10px; font-size: 16px; width: 150px; }
-    #scanArea { position: relative; display: inline-block; }
-    #focusRect { 
-      position: absolute; 
-      border: 2px dashed red; 
-      width: 80%; 
-      height: 150px; 
-      top: 50%; 
-      left: 50%; 
-      transform: translate(-50%, -50%); 
-      display: none; 
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      margin: 0;
+      padding: 10px;
+      background-color: #f0f0f0;
+    }
+    #scanArea {
+      position: relative;
+      display: inline-block;
+      width: 100%;
+      max-width: 600px;
+    }
+    video {
+      width: 100%;
+      max-width: 600px;
+      border: 3px solid #333;
+      border-radius: 8px;
+    }
+    #focusRect {
+      position: absolute;
+      border: 3px dashed #ff0000;
+      width: 90%;
+      height: 250px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      display: none;
+      pointer-events: none;
+    }
+    #result {
+      margin: 20px 0;
+      font-size: 18px;
+      color: #333;
+    }
+    button {
+      margin: 10px;
+      padding: 12px 24px;
+      font-size: 16px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
+    input {
+      padding: 10px;
+      font-size: 16px;
+      width: 150px;
+      margin: 10px;
+      border: 2px solid #333;
+      border-radius: 5px;
     }
   </style>
 </head>
 <body>
   <h2>Escaneie os Códigos</h2>
   <div id="scanArea">
-    <video id="video" autoplay></video>
+    <video id="video" autoplay muted playsinline></video>
     <div id="focusRect"></div>
   </div>
-  <canvas id="canvas" style="display:none;"></canvas>
   <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button onclick="startScan('produto')">Escanear Produto</button>
-  <input type="number" id="quantidade" placeholder="Quantidade do lote">
+  <input type="number" id="quantidade" placeholder="Quantidade do lote" min="1">
   <button onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
 
-  <script src="https://unpkg.com/@zxing/library@latest"></script>
-  <script src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
   <script>
     let notaFiscal = '';
     let produto = '';
     let quantidade = '';
     const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
-    const codeReader = new ZXing.BrowserBarcodeReader({
-      barcodeFormats: [
-        ZXing.BarcodeFormat.CODE_128,
-        ZXing.BarcodeFormat.EAN_13,
-        ZXing.BarcodeFormat.EAN_8,
-        ZXing.BarcodeFormat.UPC_A,
-        ZXing.BarcodeFormat.UPC_E
-      ]
+    let barcodeDetector = null;
+    let extractedText = '';
+
+    // Verifica suporte à Barcode Detection API
+    window.addEventListener('load', () => {
+      if ('BarcodeDetector' in window) {
+        barcodeDetector = new BarcodeDetector({
+          formats: ['code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_39', 'code_93', 'codabar']
+        });
+        resultDiv.innerHTML = 'Usando Barcode Detection API (nativa).';
+      } else {
+        resultDiv.innerHTML = 'Barcode Detection API não suportada. Usando QuaggaJS.';
+      }
     });
 
     async function startScan(tipo) {
-      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
+      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}... Aponte o código para o retângulo.`;
       focusRect.style.display = 'block';
+
       try {
-        // Iniciar stream de vídeo
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        const constraints = {
+          video: {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+          return await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+          });
+        });
         video.srcObject = stream;
         video.play();
 
-        // Configurar canvas para pré-processamento
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+        // Extrair texto com OCR
+        await extractTextFromVideo(tipo);
 
-        // Loop para pré-processar e escanear
-        async function scanFrame() {
-          if (!video.srcObject) return; // Para o loop se o vídeo for parado
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          let src = cv.imread(canvas);
-          
-          // Pré-processamento com OpenCV
-          let dst = new cv.Mat();
-          cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY); // Escala de cinza
-          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2); // Binarização
-
-          // Converter para imagem que o ZXing pode usar
-          cv.imshow(canvas, dst);
-          src.delete();
-          dst.delete();
-
-          try {
-            const result = await codeReader.decodeFromImage(canvas);
-            if (result) {
-              if (tipo === 'nota') {
-                notaFiscal = result.text;
-                resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
-              } else {
-                produto = result.text;
-                resultDiv.innerHTML = `Produto escaneado: ${produto}`;
-              }
-              stopVideo();
-              focusRect.style.display = 'none';
-              alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${result.text}`);
-            } else {
-              requestAnimationFrame(scanFrame); // Continua escaneando
-            }
-          } catch (err) {
-            requestAnimationFrame(scanFrame); // Continua escaneando
-          }
+        if (barcodeDetector) {
+          await scanWithBarcodeDetector(tipo);
+        } else {
+          await scanWithQuagga(tipo);
         }
-
-        requestAnimationFrame(scanFrame);
       } catch (err) {
-        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
-        console.error('Erro: ', err);
+        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
+        console.error('Erro ao iniciar câmera:', err);
         focusRect.style.display = 'none';
       }
     }
 
+    async function extractTextFromVideo(tipo) {
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      let attempts = 0;
+      const maxAttempts = 50;
+
+      async function captureFrame() {
+        if (attempts >= maxAttempts) {
+          console.log('OCR: Máximo de tentativas atingido.');
+          return;
+        }
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const result = await Tesseract.recognize(canvas.toDataURL(), 'por', {
+          logger: m => console.log(m)
+        });
+        extractedText = result.data.text.trim();
+        console.log('Texto extraído:', extractedText);
+
+        // Tentar identificar campos específicos (exemplo básico)
+        const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
+        for (let line of lines) {
+          if (line.includes('CNPJ') && !notaFiscal && tipo === 'nota') {
+            notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
+          } else if (line.includes('UN') && !quantidade && tipo === 'nota') {
+            quantidade = line.replace(/[^\d]/g, '');
+          } else if (line.includes('GATILHO') && !produto && tipo === 'produto') {
+            produto = line;
+          }
+        }
+
+        if (!notaFiscal || !produto || !quantidade) {
+          attempts++;
+          requestAnimationFrame(captureFrame);
+        }
+      }
+      requestAnimationFrame(captureFrame);
+    }
+
+    async function scanWithBarcodeDetector(tipo) {
+      let attempts = 0;
+      const maxAttempts = 100;
+      async function scanFrame() {
+        if (attempts >= maxAttempts) {
+          resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
+          stopVideo();
+          focusRect.style.display = 'none';
+          return;
+        }
+        try {
+          const barcodes = await barcodeDetector.detect(video);
+          if (barcodes && barcodes.length > 0) {
+            const code = barcodes[0].rawValue;
+            if (tipo === 'nota' && !notaFiscal) {
+              notaFiscal = code;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
+            } else if (tipo === 'produto' && !produto) {
+              produto = code;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
+            }
+            stopVideo();
+            focusRect.style.display = 'none';
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+          } else {
+            attempts++;
+            requestAnimationFrame(scanFrame);
+          }
+        } catch (err) {
+          attempts++;
+          requestAnimationFrame(scanFrame);
+        }
+      }
+      requestAnimationFrame(scanFrame);
+    }
+
+    function scanWithQuagga(tipo) {
+      try {
+        Quagga.init({
+          inputStream: {
+            name: 'Live',
+            type: 'LiveStream',
+            target: video,
+            constraints: {
+              facingMode: 'environment',
+              width: { ideal: 1280 },
+              height: { ideal: 720 }
+            },
+            area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
+            singleChannel: false
+          },
+          decoder: {
+            readers: [
+              'code_128_reader', 'ean_reader', 'ean_8_reader', 'upc_reader', 'upc_e_reader',
+              'code_39_reader', 'code_93_reader', 'codabar_reader'
+            ]
+          },
+          locator: { patchSize: 'medium', halfSample: true },
+          numOfWorkers: Math.min(navigator.hardwareConcurrency || 4, 2),
+          locate: true
+        }, function(err) {
+          if (err) {
+            resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar a página.';
+            console.error('Erro QuaggaJS:', err);
+            focusRect.style.display = 'none';
+            stopVideo();
+            return;
+          }
+          Quagga.start();
+        });
+
+        Quagga.onDetected(function(data) {
+          if (data && data.codeResult && data.codeResult.code) {
+            const code = data.codeResult.code;
+            if (tipo === 'nota' && !notaFiscal) {
+              notaFiscal = code;
+              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}\nTexto extraído: ${extractedText}`;
+            } else if (tipo === 'produto' && !produto) {
+              produto = code;
+              resultDiv.innerHTML = `Produto escaneado: ${produto}\nTexto extraído: ${extractedText}`;
+            }
+            Quagga.stop();
+            focusRect.style.display = 'none';
+            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
+            stopVideo();
+          }
+        });
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao configurar QuaggaJS. Tente novamente.';
+        console.error('Erro QuaggaJS:', err);
+        focusRect.style.display = 'none';
+        stopVideo();
+      }
+    }
+
     function stopVideo() {
-      if (video.srcObject) {
-        video.srcObject.getTracks().forEach(track => track.stop());
+      const stream = video.srcObject;
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
         video.srcObject = null;
       }
     }
 
     function showResults() {
-      quantidade = document.getElementById('quantidade').value;
+      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
       if (notaFiscal && produto && quantidade) {
-        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}<br>Texto extraído: ${extractedText}`;
       } else {
         resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
       }
     }
 
     function sendWhatsApp() {
-      quantidade = document.getElementById('quantidade').value;
+      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
       if (notaFiscal && produto && quantidade) {
-        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
+        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}\nTexto extraído: ${extractedText}`;
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
