@@ -56,13 +56,22 @@
     button:hover {
       background-color: #0056b3;
     }
-    input {
-      padding: 8px;
-      font-size: 14px;
-      width: 120px;
+    .editable-box {
+      display: inline-block;
+      padding: 10px;
       margin: 5px;
       border: 2px solid #333;
       border-radius: 5px;
+      background-color: #fff;
+      min-width: 150px;
+    }
+    input[type="text"], input[type="number"] {
+      padding: 8px;
+      font-size: 14px;
+      width: 100%;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      box-sizing: border-box;
     }
     #productList {
       margin-top: 20px;
@@ -87,8 +96,9 @@
         width: 100%;
         margin: 5px 0;
       }
-      input {
+      .editable-box {
         width: 100%;
+        margin: 5px 0;
       }
     }
   </style>
@@ -101,33 +111,44 @@
       <div id="focusRect"></div>
     </div>
     <div class="button-group" id="notaButtons">
-      <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
-      <button id="newNote" style="display:none;">Nova Nota</button>
+      <button id="scanNota" onclick="startScan('nota')">Escanear Nota Fiscal</button>
     </div>
     <div class="button-group" id="productButtons" style="display:none;">
-      <button onclick="startScan('produto')">Escanear Produto</button>
-      <button id="addProduct" style="display:none;">Incluir Outro Produto</button>
-      <button id="stopScan" style="display:none;" onclick="stopProductScan()">Parar Escaneamento</button>
+      <button id="scanProduto" onclick="startScan('produto')">Escanear Produto</button>
     </div>
-    <div class="button-group" id="loteButtons" style="display:none;">
-      <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1">
-      <button id="saveLote" style="display:none;">Salvar Quantidade</button>
+    <div id="productData" style="display:none;">
+      <div class="editable-box">
+        <label>OP:</label><br>
+        <input type="text" id="editOp" value="">
+      </div>
+      <div class="editable-box">
+        <label>Código Produto (00.00.00.0000):</label><br>
+        <input type="text" id="editCode" value="">
+      </div>
+      <div class="editable-box">
+        <label>Data (dd/mm/aaaa):</label><br>
+        <input type="text" id="editDate" value="">
+      </div>
+      <div class="editable-box">
+        <label>Código de Barras:</label><br>
+        <input type="text" id="editBarcode" value="">
+      </div>
+      <div class="editable-box">
+        <label>Quantidade do Lote:</label><br>
+        <input type="number" id="loteQuantity" min="1" value="">
+      </div>
+      <div class="button-group" style="margin-top: 10px;">
+        <button id="saveProduct" style="display:none;" onclick="saveProduct()">Salvar Produto</button>
+      </div>
     </div>
     <div class="button-group" id="actionButtons" style="display:none;">
-      <button onclick="showResults()">Mostrar Resultados</button>
-      <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
+      <button id="addProduct" onclick="startScan('produto')">Incluir Novo Produto</button>
+      <button id="reviewInfo" onclick="showResults()">Revisar Informações</button>
+      <button id="sendInfo" onclick="sendWhatsApp()">Enviar Informações</button>
     </div>
     <div id="result">Aguardando escaneamento...</div>
     <div id="productList"></div>
     <div id="photoPreview"></div>
-    <div id="manualFields" style="display:none;">
-      <input type="text" id="manualCode" placeholder="Código" style="display:none;">
-      <input type="text" id="manualInternalCode" placeholder="Código Interno" style="display:none;">
-      <input type="text" id="manualDescription" placeholder="Descrição" style="display:none;">
-      <input type="text" id="manualDate" placeholder="Data" style="display:none;">
-      <input type="text" id="manualOp" placeholder="OP" style="display:none;">
-      <button id="saveManual" style="display:none;" onclick="saveManualData()">Salvar Manual</button>
-    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
@@ -142,20 +163,16 @@
     const focusRect = document.getElementById('focusRect');
     const notaButtons = document.getElementById('notaButtons');
     const productButtons = document.getElementById('productButtons');
-    const loteButtons = document.getElementById('loteButtons');
+    const productData = document.getElementById('productData');
     const actionButtons = document.getElementById('actionButtons');
-    const stopScanBtn = document.getElementById('stopScan');
+    const saveProductBtn = document.getElementById('saveProduct');
     const loteQuantityInput = document.getElementById('loteQuantity');
-    const saveLoteBtn = document.getElementById('saveLote');
+    const editOp = document.getElementById('editOp');
+    const editCode = document.getElementById('editCode');
+    const editDate = document.getElementById('editDate');
+    const editBarcode = document.getElementById('editBarcode');
     const productListDiv = document.getElementById('productList');
     const photoPreviewDiv = document.getElementById('photoPreview');
-    const manualFields = document.getElementById('manualFields');
-    const manualCode = document.getElementById('manualCode');
-    const manualInternalCode = document.getElementById('manualInternalCode');
-    const manualDescription = document.getElementById('manualDescription');
-    const manualDate = document.getElementById('manualDate');
-    const manualOp = document.getElementById('manualOp');
-    const saveManualBtn = document.getElementById('saveManual');
     let barcodeDetector = null;
     let scanInterval = null;
 
@@ -192,8 +209,9 @@
           else await scanWithQuagga(tipo);
         } else if (tipo === 'produto') {
           notaButtons.style.display = 'none';
-          productButtons.style.display = 'flex';
-          stopScanBtn.style.display = 'inline';
+          productButtons.style.display = 'none';
+          productData.style.display = 'none';
+          actionButtons.style.display = 'none';
           currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
           startProductScan();
         }
@@ -212,7 +230,6 @@
           resultDiv.innerHTML = 'Não foi possível ler o código. Tente novamente.';
           stopVideo();
           focusRect.style.display = 'none';
-          document.getElementById('newNote').style.display = 'inline';
           return;
         }
         try {
@@ -228,13 +245,10 @@
               ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
               notaFiscalImage = canvas.toDataURL('image/jpeg');
               resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+              stopVideo();
+              focusRect.style.display = 'none';
+              productButtons.style.display = 'flex';
             }
-            stopVideo();
-            focusRect.style.display = 'none';
-            document.getElementById('newNote').style.display = 'inline';
-            productButtons.style.display = 'flex';
-            console.log(`Código detectado (${tipo}):`, code);
-            alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
           } else {
             attempts++;
             requestAnimationFrame(scanFrame);
@@ -277,14 +291,11 @@
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             notaFiscalImage = canvas.toDataURL('image/jpeg');
             resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+            Quagga.stop();
+            focusRect.style.display = 'none';
+            stopVideo();
+            productButtons.style.display = 'flex';
           }
-          Quagga.stop();
-          focusRect.style.display = 'none';
-          document.getElementById('newNote').style.display = 'inline';
-          productButtons.style.display = 'flex';
-          console.log(`Código detectado (${tipo}) com QuaggaJS:`, code);
-          alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${code}`);
-          stopVideo();
         }
       });
     }
@@ -293,17 +304,6 @@
       const stream = video.srcObject;
       if (stream) stream.getTracks().forEach(track => track.stop());
       video.srcObject = null;
-    }
-
-    function newNote() {
-      notaFiscal = '';
-      notaFiscalImage = '';
-      products = [];
-      resultDiv.innerHTML = 'Nova nota iniciada. Escaneie a Nota Fiscal novamente.';
-      productListDiv.innerHTML = '';
-      document.getElementById('newNote').style.display = 'none';
-      productButtons.style.display = 'none';
-      notaButtons.style.display = 'flex';
     }
 
     function startProductScan() {
@@ -319,25 +319,20 @@
           psm: 6 // Texto em linha uniforme
         });
         const text = result.data.text.trim();
-        console.log('Texto bruto extraído:', text);
         const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-        console.log('Linhas processadas:', lines);
         let dataRecognized = false;
         for (let line of lines) {
-          if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$|^\d{8}$/) && !currentProduct.internalCode) {
-            currentProduct.internalCode = line; // Código interno (00.00.00.0000 ou 00000000)
+          if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
+            currentProduct.op = line; // OP (6 dígitos, sem "/1")
             dataRecognized = true;
-          } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) {
-            currentProduct.code = line; // Código de barras (7 a 13 dígitos)
-            dataRecognized = true;
-          } else if (line.match(/GATILHO/i) && !currentProduct.description) {
-            currentProduct.description = line.replace(/GATILHO/i, '').trim() || line;
+          } else if (line.match(/^\d{8}$/) && !currentProduct.code) {
+            currentProduct.code = line.replace(/(\d{2})(\d{2})(\d{2})(\d{4})/, '$1.$2.$3.$4'); // Formata como 00.00.00.0000
             dataRecognized = true;
           } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) {
-            currentProduct.date = line; // Data (dd-mm-yyyy ou dd/mm/yyyy)
+            currentProduct.date = line.replace(/[-\/]/g, '/'); // Formata como dd/mm/aaaa
             dataRecognized = true;
-          } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
-            currentProduct.op = line; // OP (6 dígitos, sem "/1")
+          } else if (line.match(/^\d{7,13}$/) && !currentProduct.barcode) {
+            currentProduct.barcode = line; // Código de barras (7 a 13 dígitos)
             dataRecognized = true;
           }
         }
@@ -345,75 +340,48 @@
           clearInterval(scanInterval);
           stopVideo();
           focusRect.style.display = 'none';
-          stopScanBtn.style.display = 'none';
-          resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
-          photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
-          photoPreviewDiv.style.display = 'block';
-          showLoteInput();
+          productData.style.display = 'block';
+          editOp.value = currentProduct.op || '';
+          editCode.value = currentProduct.code || '';
+          editDate.value = currentProduct.date || '';
+          editBarcode.value = currentProduct.barcode || '';
+          saveProductBtn.style.display = 'inline';
         }
       }, 1000); // Tenta a cada segundo
     }
 
-    function stopProductScan() {
-      clearInterval(scanInterval);
-      stopVideo();
-      focusRect.style.display = 'none';
-      stopScanBtn.style.display = 'none';
-      productButtons.style.display = 'flex';
-      currentProduct = null;
-      resultDiv.innerHTML = 'Escaneamento parado. Tente novamente.';
-    }
-
-    function showLoteInput() {
-      loteButtons.style.display = 'flex';
-      saveLoteBtn.style.display = 'inline';
-      resultDiv.innerHTML += '\nDigite a quantidade do lote e clique em Salvar.';
-    }
-
-    function saveLote() {
+    function saveProduct() {
+      currentProduct.op = editOp.value;
+      currentProduct.code = editCode.value;
+      currentProduct.date = editDate.value;
+      currentProduct.barcode = editBarcode.value;
       const quantity = loteQuantityInput.value;
-      if (quantity && currentProduct && currentProduct.image) {
+      if (quantity) {
         currentProduct.lotes.push(parseInt(quantity));
         products.push({ ...currentProduct });
-        resultDiv.innerHTML = `Lote salvo para ${currentProduct.code || 'Produto'}. Quantidade: ${quantity}`;
-        loteButtons.style.display = 'none';
-        photoPreviewDiv.style.display = 'none';
-        currentProduct = null;
-        updateProductList();
-        productButtons.style.display = 'flex';
+        resultDiv.innerHTML = `Produto salvo: OP: ${currentProduct.op}, Código: ${currentProduct.code}, Data: ${currentProduct.date}, Código de Barras: ${currentProduct.barcode}, Quantidade: ${quantity}`;
+        photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
+        photoPreviewDiv.style.display = 'block';
+        productData.style.display = 'none';
+        saveProductBtn.style.display = 'none';
         actionButtons.style.display = 'flex';
       } else {
-        alert('Digite uma quantidade válida!');
+        alert('Digite a quantidade do lote!');
       }
     }
 
-    function saveManualData() {
-      currentProduct.code = manualCode.value || currentProduct.code;
-      currentProduct.internalCode = manualInternalCode.value || currentProduct.internalCode;
-      currentProduct.description = manualDescription.value || currentProduct.description;
-      currentProduct.date = manualDate.value || currentProduct.date;
-      currentProduct.op = manualOp.value || currentProduct.op;
-      manualFields.style.display = 'none';
-      manualCode.style.display = 'none';
-      manualInternalCode.style.display = 'none';
-      manualDescription.style.display = 'none';
-      manualDate.style.display = 'none';
-      manualOp.style.display = 'none';
-      saveManualBtn.style.display = 'none';
-      resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
-      showLoteInput();
-    }
-
-    function updateProductList() {
+    function showResults() {
+      let totalQuantity = 0;
+      products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Imagem Nota: <img src="${notaFiscalImage}" style="max-width:200px;"><br>Total Produtos: ${products.length}<br>Total Quantidade: ${totalQuantity}`;
       productListDiv.innerHTML = '<h3>Produtos Escaneados:</h3>';
       products.forEach((prod, index) => {
         productListDiv.innerHTML += `
           <div class="product-item">
-            <p>Código: ${prod.code}</p>
-            <p>Código Interno: ${prod.internalCode}</p>
-            <p>Descrição: ${prod.description}</p>
-            <p>Data: ${prod.date}</p>
             <p>OP: ${prod.op}</p>
+            <p>Código: ${prod.code}</p>
+            <p>Data: ${prod.date}</p>
+            <p>Código de Barras: ${prod.barcode}</p>
             <p>Lotes: ${prod.lotes.join(', ')}</p>
             <img src="${prod.image}" alt="Foto do produto">
           </div>
@@ -421,18 +389,11 @@
       });
     }
 
-    function showResults() {
-      let totalQuantity = 0;
-      products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
-      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Imagem Nota: <img src="${notaFiscalImage}" style="max-width:200px;"><br>Total Produtos: ${products.length}<br>Total Quantidade: ${totalQuantity}`;
-      updateProductList();
-    }
-
     function sendWhatsApp() {
       let totalQuantity = 0;
       products.forEach(prod => totalQuantity += prod.lotes.reduce((a, b) => a + b, 0));
       const message = `Nota Fiscal: ${notaFiscal}\nImagem Nota: ${notaFiscalImage}\nTotal Produtos: ${products.length}\nTotal Quantidade: ${totalQuantity}\nProdutos:\n${products.map(prod => 
-        `Código: ${prod.code || 'Não identificado'}, Código Interno: ${prod.internalCode}, Descrição: ${prod.description}, Data: ${prod.date}, OP: ${prod.op}, Lotes: ${prod.lotes.join(', ')}`).join('\n')}`;
+        `OP: ${prod.op}, Código: ${prod.code}, Data: ${prod.date}, Código de Barras: ${prod.barcode}, Lotes: ${prod.lotes.join(', ')}`).join('\n')}`;
       const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
       window.open(url, '_blank');
     }
