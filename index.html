@@ -1,152 +1,149 @@
 
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Processador de NF e Itens via Câmera Traseira</title>
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2.1.0/dist/tesseract.min.js"></script>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .section { margin-top: 20px; }
-        #result, #data { margin-top: 10px; }
-        button { margin-right: 10px; }
-        #video { width: 100%; max-width: 400px; display: none; }
-        #canvas { display: none; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Leitura de Códigos de Barras</title>
+  <style>
+    body { font-family: Arial, sans-serif; text-align: center; }
+    video { width: 100%; max-width: 500px; border: 2px solid #333; }
+    canvas { display: none; }
+    #result { margin-top: 20px; font-size: 16px; }
+    button { margin: 10px; padding: 10px 20px; font-size: 16px; cursor: pointer; }
+    input { padding: 10px; font-size: 16px; width: 150px; }
+    #scanArea { position: relative; display: inline-block; }
+    #focusRect { 
+      position: absolute; 
+      border: 2px dashed red; 
+      width: 80%; 
+      height: 150px; 
+      top: 50%; 
+      left: 50%; 
+      transform: translate(-50%, -50%); 
+      display: none; 
+    }
+  </style>
 </head>
 <body>
-    <h2>Processador de Nota Fiscal e Itens</h2>
-    <div id="step1" class="section">
-        <h3>Passo 1: Tire uma foto da Nota Fiscal</h3>
-        <video id="video1" autoplay playsinline></video>
-        <button onclick="captureNF()">Tirar Foto</button>
-        <button onclick="stopCamera('video1')">Parar Câmera</button>
-        <div id="nfResult"></div>
-    </div>
-    <div id="step2" class="section" style="display: none;">
-        <h3>Passo 2: Tire uma foto da Etiqueta de Produto</h3>
-        <video id="video2" autoplay playsinline></video>
-        <button onclick="captureItem()">Tirar Foto</button>
-        <button onclick="stopCamera('video2')">Parar Câmera</button>
-        <button onclick="processItem()">Adicionar Item</button>
-        <button onclick="finalize()">Finalizar</button>
-        <div id="itemResult"></div>
-    </div>
-    <div id="data"></div>
-    <button onclick="sendWhatsApp()" id="sendBtn" style="display: none;">Enviar via WhatsApp</button>
-    <canvas id="canvas" width="400" height="300"></canvas>
+  <h2>Escaneie os Códigos</h2>
+  <div id="scanArea">
+    <video id="video" autoplay></video>
+    <div id="focusRect"></div>
+  </div>
+  <canvas id="canvas" style="display:none;"></canvas>
+  <button onclick="startScan('nota')">Escanear Nota Fiscal</button>
+  <button onclick="startScan('produto')">Escanear Produto</button>
+  <input type="number" id="quantidade" placeholder="Quantidade do lote">
+  <button onclick="showResults()">Mostrar Resultados</button>
+  <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
+  <div id="result">Aguardando escaneamento...</div>
 
-    <script>
-        let nfData = {};
-        let items = [];
-        let stream1 = null;
-        let stream2 = null;
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d');
+  <script src="https://unpkg.com/@zxing/library@latest"></script>
+  <script src="https://docs.opencv.org/4.5.0/opencv.js"></script>
+  <script>
+    let notaFiscal = '';
+    let produto = '';
+    let quantidade = '';
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const resultDiv = document.getElementById('result');
+    const focusRect = document.getElementById('focusRect');
+    const codeReader = new ZXing.BrowserBarcodeReader({
+      barcodeFormats: [
+        ZXing.BarcodeFormat.CODE_128,
+        ZXing.BarcodeFormat.EAN_13,
+        ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.UPC_A,
+        ZXing.BarcodeFormat.UPC_E
+      ]
+    });
 
-        async function startCamera(videoId) {
-            const video = document.getElementById(videoId);
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment' } // Tenta forçar câmera traseira
-                });
-                video.srcObject = stream;
-                video.style.display = 'block';
-                if (videoId === 'video1') stream1 = stream;
-                else stream2 = stream;
-            } catch (err) {
-                alert('Erro ao acessar a câmera traseira: ' + err.message + '. Verifique as permissões ou tente novamente.');
+    async function startScan(tipo) {
+      resultDiv.innerHTML = `Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
+      focusRect.style.display = 'block';
+      try {
+        // Iniciar stream de vídeo
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        video.srcObject = stream;
+        video.play();
+
+        // Configurar canvas para pré-processamento
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+
+        // Loop para pré-processar e escanear
+        async function scanFrame() {
+          if (!video.srcObject) return; // Para o loop se o vídeo for parado
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          let src = cv.imread(canvas);
+          
+          // Pré-processamento com OpenCV
+          let dst = new cv.Mat();
+          cv.cvtColor(src, dst, cv.COLOR_RGBA2GRAY); // Escala de cinza
+          cv.adaptiveThreshold(dst, dst, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY, 11, 2); // Binarização
+
+          // Converter para imagem que o ZXing pode usar
+          cv.imshow(canvas, dst);
+          src.delete();
+          dst.delete();
+
+          try {
+            const result = await codeReader.decodeFromImage(canvas);
+            if (result) {
+              if (tipo === 'nota') {
+                notaFiscal = result.text;
+                resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal}`;
+              } else {
+                produto = result.text;
+                resultDiv.innerHTML = `Produto escaneado: ${produto}`;
+              }
+              stopVideo();
+              focusRect.style.display = 'none';
+              alert(`${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'} escaneado: ${result.text}`);
+            } else {
+              requestAnimationFrame(scanFrame); // Continua escaneando
             }
+          } catch (err) {
+            requestAnimationFrame(scanFrame); // Continua escaneando
+          }
         }
 
-        function stopCamera(videoId) {
-            const video = document.getElementById(videoId);
-            if (video.srcObject) {
-                video.srcObject.getTracks().forEach(track => track.stop());
-                video.srcObject = null;
-                video.style.display = 'none';
-            }
-        }
+        requestAnimationFrame(scanFrame);
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões.';
+        console.error('Erro: ', err);
+        focusRect.style.display = 'none';
+      }
+    }
 
-        async function captureNF() {
-            const video = document.getElementById('video1');
-            if (!stream1) await startCamera('video1');
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = canvas.toDataURL('image/png');
-            stopCamera('video1');
-            await processNFImage(imageData);
-        }
+    function stopVideo() {
+      if (video.srcObject) {
+        video.srcObject.getTracks().forEach(track => track.stop());
+        video.srcObject = null;
+      }
+    }
 
-        async function captureItem() {
-            const video = document.getElementById('video2');
-            if (!stream2) await startCamera('video2');
-            context.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const imageData = canvas.toDataURL('image/png');
-            stopCamera('video2');
-            await processItemImage(imageData);
-        }
+    function showResults() {
+      quantidade = document.getElementById('quantidade').value;
+      if (notaFiscal && produto && quantidade) {
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Produto: ${produto}<br>Quantidade: ${quantidade}`;
+      } else {
+        resultDiv.innerHTML = 'Escaneie ambos os códigos e informe a quantidade!';
+      }
+    }
 
-        async function processNFImage(imageData) {
-            const resultDiv = document.getElementById('nfResult');
-            resultDiv.innerHTML = 'Processando...';
-            const { data: { text } } = await Tesseract.recognize(imageData, 'por');
-            resultDiv.innerHTML = 'Texto extraído: <pre>' + text + '</pre>';
-
-            // Extrair número da nota fiscal e nome do cliente
-            const nfNumberMatch = text.match(/NF[-e]\s*:\s*(\d+)/i);
-            const clientNameMatch = text.match(/RAZAO SOCIAL[:\s]*([A-Za-z\s]+)/i);
-            nfData = {
-                nfNumber: nfNumberMatch ? nfNumberMatch[1] : 'Não identificado',
-                clientName: clientNameMatch ? clientNameMatch[1].trim() : 'Não identificado'
-            };
-            resultDiv.innerHTML += `<p>Número NF: ${nfData.nfNumber}<br>Nome Cliente: ${nfData.clientName}</p>`;
-            document.getElementById('step1').style.display = 'none';
-            document.getElementById('step2').style.display = 'block';
-            startCamera('video2');
-        }
-
-        async function processItemImage(imageData) {
-            const resultDiv = document.getElementById('itemResult');
-            resultDiv.innerHTML = 'Processando...';
-            const { data: { text } } = await Tesseract.recognize(imageData, 'por');
-            resultDiv.innerHTML = 'Texto extraído: <pre>' + text + '</pre>';
-
-            // Extrair OP, data e código do produto
-            const opMatch = text.match(/OP[:\s]*(\d+)/i); // Ex.: 472462
-            const dateMatch = text.match(/(\d{2}\/\d{2}\/\d{4})/); // Ex.: 23/06/2025
-            const productCodeMatch = text.match(/(\d{2}\.\d{2}\.\d{2}\.\d{4})/); // Ex.: 07.21.05.0011
-
-            let itemData = {
-                op: opMatch ? opMatch[1] : 'Não identificado',
-                date: dateMatch ? dateMatch[1] : 'Não identificado',
-                productCode: productCodeMatch ? productCodeMatch[1] : 'Não identificado',
-                quantity: prompt('Digite a quantidade para esta OP:') || 0
-            };
-            items.push(itemData);
-            resultDiv.innerHTML += `<p>OP: ${itemData.op}<br>Data: ${itemData.date}<br>Código: ${itemData.productCode}<br>Quantidade: ${itemData.quantity}</p>`;
-        }
-
-        function finalize() {
-            stopCamera('video2');
-            const dataDiv = document.getElementById('data');
-            let finalData = `Nota Fiscal: ${nfData.nfNumber}\nCliente: ${nfData.clientName}\nItens:\n`;
-            items.forEach((item, index) => {
-                finalData += `Item ${index + 1}: OP ${item.op}, Data ${item.date}, Código ${item.productCode}, Quantidade ${item.quantity}\n`;
-            });
-            dataDiv.innerHTML = `<pre>${finalData}</pre>`;
-            window.finalText = finalData;
-            document.getElementById('sendBtn').style.display = 'block';
-            document.getElementById('step2').style.display = 'none';
-        }
-
-        function sendWhatsApp() {
-            const text = window.finalText || 'Nenhum dado para enviar.';
-            window.location.href = `whatsapp://send?text=${encodeURIComponent(text)}`;
-        }
-
-        // Iniciar com a câmera traseira da nota fiscal
-        window.onload = () => startCamera('video1');
-    </script>
+    function sendWhatsApp() {
+      quantidade = document.getElementById('quantidade').value;
+      if (notaFiscal && produto && quantidade) {
+        const message = `Nota Fiscal: ${notaFiscal}\nProduto: ${produto}\nQuantidade: ${quantidade}`;
+        const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
+        window.open(url, '_blank');
+      } else {
+        alert('Preencha todas as informações antes de enviar!');
+      }
+    }
+  </script>
 </body>
 </html>
