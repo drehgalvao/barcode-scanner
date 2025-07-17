@@ -82,9 +82,6 @@
     #photoPreview {
       margin: 10px 0;
     }
-    #fileInput {
-      display: none;
-    }
     @media (max-width: 400px) {
       button {
         width: 100%;
@@ -110,12 +107,7 @@
     <div class="button-group" id="productButtons" style="display:none;">
       <button onclick="startScan('produto')">Escanear Produto</button>
       <button id="addProduct" style="display:none;">Incluir Outro Produto</button>
-    </div>
-    <div class="button-group" id="photoButtons" style="display:none;">
-      <input type="file" id="fileInput" accept="image/*" capture="camera" onchange="handleFileUpload()">
-      <button id="takePhoto" style="display:none;">Tirar Foto</button>
-      <button id="confirmPhoto" style="display:none;">Confirmar</button>
-      <button id="retakePhoto" style="display:none;">Tirar Outra Foto</button>
+      <button id="stopScan" style="display:none;" onclick="stopProductScan()">Parar Escaneamento</button>
     </div>
     <div class="button-group" id="loteButtons" style="display:none;">
       <input type="number" id="loteQuantity" placeholder="Quantidade do lote" min="1">
@@ -150,17 +142,13 @@
     const focusRect = document.getElementById('focusRect');
     const notaButtons = document.getElementById('notaButtons');
     const productButtons = document.getElementById('productButtons');
-    const photoButtons = document.getElementById('photoButtons');
     const loteButtons = document.getElementById('loteButtons');
     const actionButtons = document.getElementById('actionButtons');
-    const takePhotoBtn = document.getElementById('takePhoto');
-    const confirmPhotoBtn = document.getElementById('confirmPhoto');
-    const retakePhotoBtn = document.getElementById('retakePhoto');
+    const stopScanBtn = document.getElementById('stopScan');
     const loteQuantityInput = document.getElementById('loteQuantity');
     const saveLoteBtn = document.getElementById('saveLote');
     const productListDiv = document.getElementById('productList');
     const photoPreviewDiv = document.getElementById('photoPreview');
-    const fileInput = document.getElementById('fileInput');
     const manualFields = document.getElementById('manualFields');
     const manualCode = document.getElementById('manualCode');
     const manualInternalCode = document.getElementById('manualInternalCode');
@@ -169,6 +157,7 @@
     const manualOp = document.getElementById('manualOp');
     const saveManualBtn = document.getElementById('saveManual');
     let barcodeDetector = null;
+    let scanInterval = null;
 
     window.addEventListener('load', () => {
       if ('BarcodeDetector' in window) {
@@ -185,31 +174,33 @@
       resultDiv.innerHTML = `Iniciando ${tipo === 'nota' ? 'Nota Fiscal' : 'Produto'}...`;
       focusRect.style.display = 'block';
 
-      if (tipo === 'nota') {
-        try {
-          const constraints = {
-            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
-          };
-          const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
-            return await navigator.mediaDevices.getUserMedia({
-              video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
-            });
+      try {
+        const constraints = {
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
+        };
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+          return await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 }, focusMode: 'continuous' }
           });
-          video.srcObject = stream;
-          video.play();
+        });
+        video.srcObject = stream;
+        video.play();
+
+        if (tipo === 'nota') {
+          notaButtons.style.display = 'none';
           if (barcodeDetector) await scanWithBarcodeDetector(tipo);
           else await scanWithQuagga(tipo);
-        } catch (err) {
-          resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
-          console.error('Erro:', err);
-          focusRect.style.display = 'none';
+        } else if (tipo === 'produto') {
+          notaButtons.style.display = 'none';
+          productButtons.style.display = 'flex';
+          stopScanBtn.style.display = 'inline';
+          currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
+          startProductScan();
         }
-      } else if (tipo === 'produto') {
-        currentProduct = { image: '', code: '', internalCode: '', description: '', date: '', op: '', lotes: [] };
-        notaButtons.style.display = 'none';
-        productButtons.style.display = 'none';
-        photoButtons.style.display = 'flex';
-        takePhotoBtn.style.display = 'inline';
+      } catch (err) {
+        resultDiv.innerHTML = 'Erro ao acessar a câmera. Verifique permissões ou use HTTPS.';
+        console.error('Erro:', err);
+        focusRect.style.display = 'none';
       }
     }
 
@@ -315,111 +306,62 @@
       notaButtons.style.display = 'flex';
     }
 
-    function takePhoto() {
-      if (fileInput && fileInput.click) {
-        fileInput.click();
-      } else {
-        resultDiv.innerHTML = 'A câmera nativa não é suportada. Tente outro dispositivo ou recarregue a página.';
-        console.error('Falha ao acessar a câmera nativa.');
-      }
-    }
-
-    function handleFileUpload() {
-      const file = fileInput.files[0];
-      if (file) {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-          currentProduct.image = e.target.result;
-          // Pré-processamento leve: ajuste de contraste
-          const img = new Image();
-          img.onload = function() {
-            const canvas = document.createElement('canvas');
-            canvas.width = img.width;
-            canvas.height = img.height;
-            const ctx = canvas.getContext('2d');
-            ctx.drawImage(img, 0, 0);
-            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            const data = imageData.data;
-            for (let i = 0; i < data.length; i += 4) {
-              const brightness = (data[i] + data[i + 1] + data[i + 2]) / 3;
-              const contrast = 1.2; // Aumenta contraste ligeiramente
-              const newBrightness = Math.min(255, Math.max(0, (brightness - 128) * contrast + 128));
-              data[i] = data[i + 1] = data[i + 2] = newBrightness;
-            }
-            ctx.putImageData(imageData, 0, 0);
-            currentProduct.image = canvas.toDataURL('image/jpeg');
-            photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
-            photoPreviewDiv.style.display = 'block';
-            takePhotoBtn.style.display = 'none';
-            fileInput.value = '';
-            confirmPhotoBtn.style.display = 'inline';
-            retakePhotoBtn.style.display = 'inline';
-          };
-          img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-
-    async function confirmProductPhoto() {
-      photoPreviewDiv.style.display = 'block';
-      confirmPhotoBtn.style.display = 'none';
-      retakePhotoBtn.style.display = 'none';
-      photoButtons.style.display = 'none';
-
-      const result = await Tesseract.recognize(currentProduct.image, 'por', {
-        logger: m => console.log(m),
-        psm: 6 // Texto em linha uniforme
-      });
-      const text = result.data.text.trim();
-      console.log('Texto bruto extraído:', text);
-      const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
-      console.log('Linhas processadas:', lines);
-      let dataRecognized = false;
-      for (let line of lines) {
-        if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$|^\d{8}$/) && !currentProduct.internalCode) {
-          currentProduct.internalCode = line; // Código interno (00.00.00.0000 ou 00000000)
-          dataRecognized = true;
-        } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) {
-          currentProduct.code = line; // Código de barras (7 a 13 dígitos)
-          dataRecognized = true;
-        } else if (line.match(/GATILHO/i) && !currentProduct.description) {
-          currentProduct.description = line.replace(/GATILHO/i, '').trim() || line;
-          dataRecognized = true;
-        } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) {
-          currentProduct.date = line; // Data (dd-mm-yyyy ou dd/mm/yyyy)
-          dataRecognized = true;
-        } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
-          currentProduct.op = line; // OP (6 dígitos, sem "/1")
-          dataRecognized = true;
+    function startProductScan() {
+      scanInterval = setInterval(async () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        currentProduct.image = canvas.toDataURL('image/jpeg');
+        const result = await Tesseract.recognize(currentProduct.image, 'por', {
+          logger: m => console.log(m),
+          psm: 6 // Texto em linha uniforme
+        });
+        const text = result.data.text.trim();
+        console.log('Texto bruto extraído:', text);
+        const lines = text.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        console.log('Linhas processadas:', lines);
+        let dataRecognized = false;
+        for (let line of lines) {
+          if (line.match(/^\d{2}\.\d{2}\.\d{2}\.\d{4}$|^\d{8}$/) && !currentProduct.internalCode) {
+            currentProduct.internalCode = line; // Código interno (00.00.00.0000 ou 00000000)
+            dataRecognized = true;
+          } else if (line.match(/^\d{7,13}$/) && !currentProduct.code) {
+            currentProduct.code = line; // Código de barras (7 a 13 dígitos)
+            dataRecognized = true;
+          } else if (line.match(/GATILHO/i) && !currentProduct.description) {
+            currentProduct.description = line.replace(/GATILHO/i, '').trim() || line;
+            dataRecognized = true;
+          } else if (line.match(/^\d{2}[-\/]\d{2}[-\/]\d{4}$/) && !currentProduct.date) {
+            currentProduct.date = line; // Data (dd-mm-yyyy ou dd/mm/yyyy)
+            dataRecognized = true;
+          } else if (line.match(/^\d{6}(?![/1])/) && !currentProduct.op) {
+            currentProduct.op = line; // OP (6 dígitos, sem "/1")
+            dataRecognized = true;
+          }
         }
-      }
-      if (!dataRecognized) {
-        resultDiv.innerHTML = 'Nenhum dado reconhecido. Verifique a etiqueta e edite manualmente, se necessário.';
-        manualCode.value = currentProduct.code || '';
-        manualInternalCode.value = currentProduct.internalCode || '';
-        manualDescription.value = currentProduct.description || '';
-        manualDate.value = currentProduct.date || '';
-        manualOp.value = currentProduct.op || '';
-        manualFields.style.display = 'block';
-        manualCode.style.display = 'inline';
-        manualInternalCode.style.display = 'inline';
-        manualDescription.style.display = 'inline';
-        manualDate.style.display = 'inline';
-        manualOp.style.display = 'inline';
-        saveManualBtn.style.display = 'inline';
-        return;
-      }
-      resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
-      showLoteInput();
+        if (dataRecognized) {
+          clearInterval(scanInterval);
+          stopVideo();
+          focusRect.style.display = 'none';
+          stopScanBtn.style.display = 'none';
+          resultDiv.innerHTML = `Produto escaneado: ${currentProduct.code || 'Não encontrado'}\nCódigo Interno: ${currentProduct.internalCode || 'Não encontrado'}\nDescrição: ${currentProduct.description || 'Não encontrada'}\nData: ${currentProduct.date || 'Não encontrada'}\nOP: ${currentProduct.op || 'Não encontrada'}`;
+          photoPreviewDiv.innerHTML = `<p>Foto capturada:</p><img src="${currentProduct.image}" alt="Foto do produto">`;
+          photoPreviewDiv.style.display = 'block';
+          showLoteInput();
+        }
+      }, 1000); // Tenta a cada segundo
     }
 
-    function retakeProductPhoto() {
-      photoPreviewDiv.style.display = 'none';
-      confirmPhotoBtn.style.display = 'none';
-      retakePhotoBtn.style.display = 'none';
-      takePhotoBtn.style.display = 'inline';
-      currentProduct.image = '';
+    function stopProductScan() {
+      clearInterval(scanInterval);
+      stopVideo();
+      focusRect.style.display = 'none';
+      stopScanBtn.style.display = 'none';
+      productButtons.style.display = 'flex';
+      currentProduct = null;
+      resultDiv.innerHTML = 'Escaneamento parado. Tente novamente.';
     }
 
     function showLoteInput() {
@@ -441,7 +383,7 @@
         productButtons.style.display = 'flex';
         actionButtons.style.display = 'flex';
       } else {
-        alert('Confirme a foto e digite uma quantidade válida!');
+        alert('Digite uma quantidade válida!');
       }
     }
 
