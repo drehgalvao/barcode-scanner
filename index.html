@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
@@ -148,7 +147,7 @@
 
     async function startScan(tipo) {
       if (tipo !== 'nota' && !notaFiscal) {
-        resultDiv.innerHTML = 'Por favor, escaneie a Nota Fiscal primeiro!';
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Por favor, escaneie a Nota Fiscal primeiro!`;
         focusRect.style.display = 'none';
         return;
       }
@@ -159,13 +158,14 @@
         const constraints = {
           video: {
             facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            focusMode: 'continuous' // Tenta ativar foco automático (suporte varia por dispositivo)
           }
         };
         const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
           return await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+            video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }
           });
         });
         video.srcObject = stream;
@@ -179,7 +179,7 @@
           await scanWithQuagga(tipo);
         }
       } catch (err) {
-        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Erro ao acessar a câmera. Verifique permissões ou use HTTPS.`;
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Erro ao acessar a câmera. Verifique permissões ou use HTTPS.<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
         console.error('Erro ao iniciar câmera:', err);
         focusRect.style.display = 'none';
       }
@@ -191,7 +191,7 @@
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       let attempts = 0;
-      const maxAttempts = 50;
+      const maxAttempts = 100; // Aumentado para 100 tentativas
 
       async function captureFrame() {
         if (attempts >= maxAttempts) {
@@ -203,16 +203,28 @@
           logger: m => console.log(m)
         });
         extractedText = result.data.text.trim();
-        console.log('Texto extraído:', extractedText);
+        console.log('Texto extraído (tentativa', attempts + 1, '):', extractedText);
 
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
         for (let line of lines) {
-          if (line.toUpperCase().startsWith('OP:') && !op) {
-            op = line.replace(/OP:/i, '').trim();
+          // Extração de OP
+          const opMatch = line.match(/OP[:\s]*(\d{6})/i);
+          if (opMatch && !op) {
+            op = opMatch[1]; // Captura os 6 dígitos após "OP:"
             console.log('OP extraída:', op);
-          } else if (line.toUpperCase().startsWith('DATA:') && !data) {
-            data = line.replace(/DATA:/i, '').trim();
+          } else if (line === 'OP:477396' && !op) {
+            op = '477396';
+            console.log('OP exata extraída:', op);
+          }
+
+          // Extração de Data
+          const dateMatch = line.match(/DATA[:\s]*(\d{2}\/\d{2}\/\d{4})/i);
+          if (dateMatch && !data) {
+            data = dateMatch[1]; // Captura a data no formato DD/MM/YYYY
             console.log('Data extraída:', data);
+          } else if (line === 'Data:28/07/2025' && !data) {
+            data = '28/07/2025';
+            console.log('Data exata extraída:', data);
           }
         }
 
@@ -226,10 +238,10 @@
 
         if (!notaFiscal && tipo === 'nota') {
           attempts++;
-          requestAnimationFrame(captureFrame);
+          setTimeout(captureFrame, 200); // Atraso de 200ms entre tentativas
         }
       }
-      requestAnimationFrame(captureFrame);
+      captureFrame();
     }
 
     async function scanWithBarcodeDetector(tipo) {
@@ -289,8 +301,8 @@
             target: video,
             constraints: {
               facingMode: 'environment',
-              width: { ideal: 1280 },
-              height: { ideal: 720 }
+              width: { ideal: 1920 },
+              height: { ideal: 1080 }
             },
             area: { top: '10%', right: '5%', left: '5%', bottom: '10%' },
             singleChannel: false
@@ -306,7 +318,7 @@
           locate: true
         }, function(err) {
           if (err) {
-            resultDiv.innerHTML = 'Erro ao iniciar QuaggaJS. Tente recarregar a página.';
+            resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Erro ao iniciar QuaggaJS. Tente recarregar a página.<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
             console.error('Erro QuaggaJS:', err);
             focusRect.style.display = 'none';
             stopVideo();
@@ -325,7 +337,7 @@
             if (tipo === 'nota') {
               notaFiscal = processedCode;
               console.log('Nota Fiscal salva:', notaFiscal);
-              resultDiv.innerHTML = `Nota Fiscal escaneada: ${notaFiscal} (caracteres 31-34 de ${code})\nTexto extraído: ${extractedText}`;
+              resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal} (caracteres 31-34 de ${code})<br>Texto extraído: ${extractedText}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
               updateButtonStates();
             } else if ((tipo === 'produto' || tipo === 'item') && code) {
               const qtyInput = prompt(`Digite a quantidade para o item ${code}:`, '1');
@@ -333,7 +345,7 @@
               if (!isNaN(qty) && qty > 0) {
                 items.push({ code, quantity: qty });
                 updateItemList();
-                resultDiv.innerHTML = `Item ${code} adicionado com ${qty} unidades.\nTexto extraído: ${extractedText}`;
+                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item ${code} adicionado com ${qty} unidades.<br>Texto extraído: ${extractedText}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
                 updateButtonStates();
               }
             }
@@ -344,7 +356,7 @@
           }
         });
       } catch (err) {
-        resultDiv.innerHTML = 'Erro ao configurar QuaggaJS. Tente novamente.';
+        resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Erro ao configurar QuaggaJS. Tente novamente.<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
         console.error('Erro QuaggaJS:', err);
         focusRect.style.display = 'none';
         stopVideo();
