@@ -116,6 +116,8 @@
     let notaFiscal = '';
     let items = [];
     let extractedText = '';
+    let op = '';
+    let data = '';
     const video = document.getElementById('video');
     const resultDiv = document.getElementById('result');
     const focusRect = document.getElementById('focusRect');
@@ -204,13 +206,20 @@
         console.log('Texto extraído:', extractedText);
 
         const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
-        if (tipo === 'nota') {
+        for (let line of lines) {
+          if (line.toUpperCase().startsWith('OP:') && !op) {
+            op = line.replace(/OP:/i, '').trim();
+            console.log('OP extraída:', op);
+          } else if (line.toUpperCase().startsWith('DATA:') && !data) {
+            data = line.replace(/DATA:/i, '').trim();
+            console.log('Data extraída:', data);
+          }
+        }
+
+        if (!notaFiscal && tipo === 'nota') {
           for (let line of lines) {
             if (line.includes('CNPJ') && !notaFiscal) {
               notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
-            } else if (line.match(/(\d+)\s*UN/i)) {
-              let qty = line.match(/(\d+)\s*UN/i)[1];
-              if (!quantidade) quantidade = qty;
             }
           }
         }
@@ -244,7 +253,7 @@
             if (tipo === 'nota') {
               notaFiscal = processedCode;
               console.log('Nota Fiscal salva:', notaFiscal);
-              resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal} (caracteres 31-34 de ${code})<br>Texto extraído: ${extractedText}`;
+              resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal} (caracteres 31-34 de ${code})<br>Texto extraído: ${extractedText}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
               updateButtonStates();
             } else if ((tipo === 'produto' || tipo === 'item') && code) {
               const qtyInput = prompt(`Digite a quantidade para o item ${code}:`, '1');
@@ -252,7 +261,7 @@
               if (!isNaN(qty) && qty > 0) {
                 items.push({ code, quantity: qty });
                 updateItemList();
-                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item ${code} adicionado com ${qty} unidades.<br>Texto extraído: ${extractedText}`;
+                resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item ${code} adicionado com ${qty} unidades.<br>Texto extraído: ${extractedText}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
                 updateButtonStates();
               }
             }
@@ -363,14 +372,14 @@
     function removeItem(index) {
       items.splice(index, 1);
       updateItemList();
-      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item removido. Total de itens: ${items.length}.`;
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal}<br>Item removido. Total de itens: ${items.length}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
       updateButtonStates();
     }
 
     function showResults() {
-      console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'extractedText:', extractedText);
+      console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'extractedText:', extractedText, 'op:', op, 'data:', data);
       if (notaFiscal) {
-        let resultText = `Nota Fiscal: ${notaFiscal}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}`;
+        let resultText = `Nota Fiscal: ${notaFiscal}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
         if (items.length > 0) {
           resultText += '<br>Itens:<ul>';
           items.forEach(item => {
@@ -388,7 +397,7 @@
 
     function sendWhatsApp() {
       if (notaFiscal && items.length > 0) {
-        let message = `Nota Fiscal: ${notaFiscal}\nTexto extraído: ${extractedText || 'Nenhum texto extraído'}\nItens:`;
+        let message = `Nota Fiscal: ${notaFiscal}\nTexto extraído: ${extractedText || 'Nenhum texto extraído'}\nOP: ${op || 'Não encontrada'}\nData: ${data || 'Não encontrada'}\nItens:`;
         items.forEach(item => {
           message += `\n- ${item.code} - ${item.quantity} unidades`;
         });
