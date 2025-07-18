@@ -104,7 +104,7 @@
   <button id="notaBtn" onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button id="produtoBtn" onclick="startScan('produto')" disabled>Escanear Primeiro Produto</button>
   <button id="itemBtn" onclick="startScan('item')" disabled>Adicionar Item</button>
-  <input type="number" id="quantidade" placeholder="Quantidade do lote" min="1">
+  <!-- Campo de quantidade removido, agora a quantidade é apenas por item -->
   <button id="showResultsBtn" onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
   <div id="result">Aguardando escaneamento...</div>
@@ -368,13 +368,9 @@
     }
 
     function showResults() {
-      console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'quantidade:', quantidade);
-      const quantidadeInput = document.getElementById('quantidade').value;
-      const quantidadeExtrada = extractedText.match(/(\d+)\s*UN/i) ? extractedText.match(/(\d+)\s*UN/i)[1] : null;
-      let quantidade = quantidadeInput || quantidadeExtrada || '';
-
+      console.log('showResults chamado - notaFiscal:', notaFiscal, 'items:', items, 'extractedText:', extractedText);
       if (notaFiscal) {
-        let resultText = `Nota Fiscal: ${notaFiscal}<br>Quantidade Total: ${quantidade || 'Não informada'}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}`;
+        let resultText = `Nota Fiscal: ${notaFiscal}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}`;
         if (items.length > 0) {
           resultText += '<br>Itens:<ul>';
           items.forEach(item => {
@@ -391,16 +387,15 @@
     }
 
     function sendWhatsApp() {
-      quantidade = document.getElementById('quantidade').value || (extractedText.match(/(\d+)\s*UN/i) || [])[1];
-      if (notaFiscal && (items.length > 0) && quantidade) {
-        let message = `Nota Fiscal: ${notaFiscal}\nQuantidade Total: ${quantidade}\nTexto extraído: ${extractedText}\nItens:`;
+      if (notaFiscal && items.length > 0) {
+        let message = `Nota Fiscal: ${notaFiscal}\nTexto extraído: ${extractedText || 'Nenhum texto extraído'}\nItens:`;
         items.forEach(item => {
           message += `\n- ${item.code} - ${item.quantity} unidades`;
         });
         const url = `https://api.whatsapp.com/send?text=${encodeURIComponent(message)}`;
         window.open(url, '_blank');
       } else {
-        alert(`Nota Fiscal: ${notaFiscal || 'Não escaneada'}\nEscaneie a Nota Fiscal, adicione pelo menos um item e informe a quantidade!`);
+        alert(`Nota Fiscal: ${notaFiscal || 'Não escaneada'}\nEscaneie a Nota Fiscal e adicione pelo menos um item!`);
       }
     }
   </script>
