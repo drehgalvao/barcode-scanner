@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Leitura de Códigos de Barras</title>
+  <title>Leitura de Códigos de Barras e Etiquetas</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -95,7 +95,7 @@
   </style>
 </head>
 <body>
-  <h2>Escaneie os Códigos</h2>
+  <h2>Escaneie os Códigos e Etiquetas</h2>
   <div id="scanArea">
     <video id="video" autoplay muted playsinline></video>
     <div id="focusRect"></div>
@@ -103,14 +103,15 @@
   <button id="notaBtn" onclick="startScan('nota')">Escanear Nota Fiscal</button>
   <button id="produtoBtn" onclick="startScan('produto')" disabled>Escanear Primeiro Produto</button>
   <button id="itemBtn" onclick="startScan('item')" disabled>Adicionar Item</button>
-  <!-- Campo de quantidade removido, agora a quantidade é apenas por item -->
   <button id="showResultsBtn" onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
-  <div id="result">Aguardando escaneamento...</div>
+  <input type="file" id="imageInput" accept="image/*" onchange="processImage(event)">
+  <button onclick="captureImage()">Capturar Imagem da Etiqueta</button>
+  <div id="result">Aguardando escaneamento ou upload...</div>
   <div id="itemList"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ocrad.js@0.0.1/ocrad.min.js"></script>
   <script>
     let notaFiscal = '';
     let items = [];
@@ -185,63 +186,95 @@
       }
     }
 
+    // OCRAD para imagens e vídeo
     async function extractTextFromVideo(tipo) {
       const canvas = document.createElement('canvas');
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
-      let attempts = 0;
-      const maxAttempts = 100; // Aumentado para 100 tentativas
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const text = OCRAD(imageData);
+      await processText(text);
+    }
 
-      async function captureFrame() {
-        if (attempts >= maxAttempts) {
-          console.log('OCR: Máximo de tentativas atingido.');
-          return;
+    async function captureImage() {
+      const constraints = {
+        video: {
+          facingMode: { ideal: 'environment' },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 }
         }
+      };
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+        video.play();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        const result = await Tesseract.recognize(canvas.toDataURL(), 'por', {
-          logger: m => console.log(m)
-        });
-        extractedText = result.data.text.trim();
-        console.log('Texto extraído (tentativa', attempts + 1, '):', extractedText);
+        stream.getTracks().forEach(track => track.stop());
 
-        const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
-        for (let line of lines) {
-          // Extração de OP
-          const opMatch = line.match(/OP[:\s]*(\d{6})/i);
-          if (opMatch && !op) {
-            op = opMatch[1]; // Captura os 6 dígitos após "OP:"
-            console.log('OP extraída:', op);
-          } else if (line === 'OP:477396' && !op) {
-            op = '477396';
-            console.log('OP exata extraída:', op);
-          }
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const text = OCRAD(imageData);
+        await processText(text);
+      } catch (err) {
+        resultDiv.innerHTML = `Erro ao capturar imagem: ${err.message}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
+        console.error('Erro ao capturar imagem:', err);
+      }
+    }
 
-          // Extração de Data
-          const dateMatch = line.match(/DATA[:\s]*(\d{2}\/\d{2}\/\d{4})/i);
-          if (dateMatch && !data) {
-            data = dateMatch[1]; // Captura a data no formato DD/MM/YYYY
-            console.log('Data extraída:', data);
-          } else if (line === 'Data:28/07/2025' && !data) {
-            data = '28/07/2025';
-            console.log('Data exata extraída:', data);
-          }
+    async function processImage(event) {
+      const file = event.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = async (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = img.width;
+            canvas.height = img.height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const text = OCRAD(imageData);
+            processText(text);
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function processText(text) {
+      extractedText = text.trim();
+      console.log('Texto detectado pelo OCRAD:', extractedText);
+
+      const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
+      for (let line of lines) {
+        const opMatch = line.match(/OP[:\s]*(\d{6})/i);
+        if (opMatch && !op) {
+          op = opMatch[1];
+          console.log('OP extraída:', op);
+        } else if (line === 'OP:477396' && !op) {
+          op = '477396';
+          console.log('OP exata extraída:', op);
         }
 
-        if (!notaFiscal && tipo === 'nota') {
-          for (let line of lines) {
-            if (line.includes('CNPJ') && !notaFiscal) {
-              notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
-            }
-          }
-        }
-
-        if (!notaFiscal && tipo === 'nota') {
-          attempts++;
-          setTimeout(captureFrame, 200); // Atraso de 200ms entre tentativas
+        const dateMatch = line.match(/DATA[:\s]*(\d{2}\/\d{2}\/\d{4})/i);
+        if (dateMatch && !data) {
+          data = dateMatch[1];
+          console.log('Data extraída:', data);
+        } else if (line === 'Data:28/07/2025' && !data) {
+          data = '28/07/2025';
+          console.log('Data exata extraída:', data);
         }
       }
-      captureFrame();
+
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Texto detectado: ${extractedText}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
     }
 
     async function scanWithBarcodeDetector(tipo) {
