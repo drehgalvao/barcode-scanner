@@ -100,13 +100,11 @@
   <button id="itemBtn" onclick="startScan('item')" disabled>Adicionar Item</button>
   <button id="showResultsBtn" onclick="showResults()">Mostrar Resultados</button>
   <button onclick="sendWhatsApp()">Enviar via WhatsApp</button>
-  <button id="captureBtn" onclick="takePhoto()">Tirar Foto</button>
-  <button id="startCaptureBtn" onclick="startCapture()">Capturar Foto da Etiqueta</button>
-  <div id="result">Aguardando escaneamento ou captura...</div>
+  <div id="result">Aguardando escaneamento...</div>
   <div id="itemList"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@2/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/ocrad.js@0.0.1/ocrad.min.js"></script>
   <script>
     let notaFiscal = '';
     let items = [];
@@ -121,9 +119,6 @@
     const produtoBtn = document.getElementById('produtoBtn');
     const itemBtn = document.getElementById('itemBtn');
     const showResultsBtn = document.getElementById('showResultsBtn');
-    const startCaptureBtn = document.getElementById('startCaptureBtn');
-    const captureBtn = document.getElementById('captureBtn');
-    let stream = null;
     let barcodeDetector = null;
 
     // Verifica suporte à Barcode Detection API
@@ -150,7 +145,7 @@
         focusRect.style.display = 'none';
         return;
       }
-      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : tipo === 'produto' ? 'Primeiro Produto' : 'Item'}... Aponte o código para o retângulo.`;
+      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Escaneando ${tipo === 'nota' ? 'Nota Fiscal' : tipo === 'produto' ? 'Primeiro Produto' : 'Item'}... Aponte o código para o retângulo. Mantenha a câmera estável por alguns segundos.`;
       focusRect.style.display = 'block';
 
       try {
@@ -162,13 +157,15 @@
             focusMode: 'continuous'
           }
         };
-        stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
+        const stream = await navigator.mediaDevices.getUserMedia(constraints).catch(async () => {
           return await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'user', width: { ideal: 1920 }, height: { ideal: 1080 } }
           });
         });
         video.srcObject = stream;
         video.play();
+
+        await extractTextFromVideo(tipo);
 
         if (barcodeDetector) {
           await scanWithBarcodeDetector(tipo);
@@ -180,6 +177,89 @@
         console.error('Erro ao iniciar câmera:', err);
         focusRect.style.display = 'none';
       }
+    }
+
+    async function extractTextFromVideo(tipo) {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      let attempts = 0;
+      const maxAttempts = 100;
+
+      async function captureFrame() {
+        if (attempts >= maxAttempts) {
+          resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Não foi possível ler o texto da etiqueta. Tente ajustar a iluminação ou o ângulo.<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
+          return;
+        }
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        // Pré-processamento: Converter para escala de cinza e aumentar contraste
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
+          const contrast = (gray - 128) * 1.5 + 128;
+          const value = Math.min(255, Math.max(0, contrast));
+          data[i] = data[i + 1] = data[i + 2] = value;
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        // Foco no retângulo (90% de largura, 100px de altura)
+        const rectWidth = canvas.width * 0.9;
+        const rectHeight = 100;
+        const rectX = (canvas.width - rectWidth) / 2;
+        const rectY = (canvas.height - rectHeight) / 2;
+        const croppedCanvas = document.createElement('canvas');
+        croppedCanvas.width = rectWidth;
+        croppedCanvas.height = rectHeight;
+        const croppedCtx = croppedCanvas.getContext('2d');
+        croppedCtx.drawImage(canvas, rectX, rectY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
+
+        // Uso do OCRad.js
+        const imageDataForOCR = croppedCtx.getImageData(0, 0, rectWidth, rectHeight);
+        extractedText = OCRAD(imageDataForOCR);
+        console.log('Texto extraído (tentativa', attempts + 1, '):', extractedText);
+
+        const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
+        for (let line of lines) {
+          const opMatch = line.match(/OP[:\s]*(\d{6})/i);
+          if (opMatch && !op) {
+            op = opMatch[1];
+            console.log('OP extraída:', op);
+          } else if (line === 'OP:477396' && !op) {
+            op = '477396';
+            console.log('OP exata extraída:', op);
+          }
+
+          const dateMatch = line.match(/DATA[:\s]*(\d{2}\/\d{2}\/\d{4})/i);
+          if (dateMatch && !data) {
+            data = dateMatch[1];
+            console.log('Data extraída:', data);
+          } else if (line === 'Data:28/07/2025' && !data) {
+            data = '28/07/2025';
+            console.log('Data exata extraída:', data);
+          }
+        }
+
+        if (!notaFiscal && tipo === 'nota') {
+          for (let line of lines) {
+            if (line.includes('CNPJ') && !notaFiscal) {
+              notaFiscal = line.replace(/CNPJ[:\s]*/i, '').trim();
+            }
+          }
+        }
+
+        if (!notaFiscal && tipo === 'nota') {
+          attempts++;
+          setTimeout(captureFrame, 300); // Atraso de 300ms
+        }
+      }
+      captureFrame();
     }
 
     async function scanWithBarcodeDetector(tipo) {
@@ -302,14 +382,12 @@
     }
 
     function stopVideo() {
+      const stream = video.srcObject;
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
         video.srcObject = null;
-        stream = null;
       }
       focusRect.style.display = 'none';
-      captureBtn.style.display = 'none';
-      startCaptureBtn.style.display = 'inline-block';
     }
 
     function updateItemList() {
@@ -359,108 +437,6 @@
       } else {
         alert(`Nota Fiscal: ${notaFiscal || 'Não escaneada'}\nEscaneie a Nota Fiscal e adicione pelo menos um item!`);
       }
-    }
-
-    async function startCapture() {
-      try {
-        const constraints = {
-          video: {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            focusMode: 'continuous'
-          }
-        };
-        stream = await navigator.mediaDevices.getUserMedia(constraints);
-        video.srcObject = stream;
-        video.play();
-        focusRect.style.display = 'block';
-        resultDiv.innerHTML = 'Aponte a câmera para a etiqueta e clique em "Tirar Foto" quando estiver pronto.';
-        startCaptureBtn.style.display = 'none';
-        captureBtn.style.display = 'inline-block';
-      } catch (err) {
-        resultDiv.innerHTML = `Erro ao acessar a câmera: ${err.message}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
-        console.error('Erro ao iniciar captura:', err);
-      }
-    }
-
-    async function takePhoto() {
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-      // Pré-processamento: Escala de cinza e contraste
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const data = imageData.data;
-      for (let i = 0; i < data.length; i += 4) {
-        const r = data[i];
-        const g = data[i + 1];
-        const b = data[i + 2];
-        const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-        const contrast = (gray - 128) * 1.5 + 128;
-        const value = Math.min(255, Math.max(0, contrast));
-        data[i] = data[i + 1] = data[i + 2] = value;
-      }
-      ctx.putImageData(imageData, 0, 0);
-
-      const imageDataUrl = canvas.toDataURL('image/jpeg');
-      await processImageFromUrl(imageDataUrl);
-      stopVideo();
-    }
-
-    async function processImageFromUrl(imageDataUrl) {
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-      img.src = imageDataUrl;
-      await new Promise(resolve => img.onload = resolve);
-
-      canvas.width = img.width;
-      canvas.height = img.height;
-      ctx.drawImage(img, 0, 0);
-
-      // Foco na região de interesse (retângulo)
-      const rectWidth = canvas.width * 0.9;
-      const rectHeight = 100;
-      const rectX = (canvas.width - rectWidth) / 2;
-      const rectY = (canvas.height - rectHeight) / 2;
-      const croppedCanvas = document.createElement('canvas');
-      croppedCanvas.width = rectWidth;
-      croppedCanvas.height = rectHeight;
-      const croppedCtx = croppedCanvas.getContext('2d');
-      croppedCtx.drawImage(canvas, rectX, rectY, rectWidth, rectHeight, 0, 0, rectWidth, rectHeight);
-
-      const result = await Tesseract.recognize(croppedCanvas.toDataURL(), 'por', {
-        logger: m => console.log(m),
-        tessedit_pageseg_mode: 6 // Assume uma única linha de texto
-      });
-      extractedText = result.data.text.trim();
-      console.log('Texto extraído da foto:', extractedText);
-
-      const lines = extractedText.split('\n').map(line => line.trim()).filter(line => line);
-      for (let line of lines) {
-        const opMatch = line.match(/OP[:\s]*(\d{6})/i);
-        if (opMatch && !op) {
-          op = opMatch[1];
-          console.log('OP extraída:', op);
-        } else if (line === 'OP:477396' && !op) {
-          op = '477396';
-          console.log('OP exata extraída:', op);
-        }
-
-        const dateMatch = line.match(/DATA[:\s]*(\d{2}\/\d{2}\/\d{4})/i);
-        if (dateMatch && !data) {
-          data = dateMatch[1];
-          console.log('Data extraída:', data);
-        } else if (line === 'Data:28/07/2025' && !data) {
-          data = '28/07/2025';
-          console.log('Data exata extraída:', data);
-        }
-      }
-
-      resultDiv.innerHTML = `Nota Fiscal: ${notaFiscal || 'Não escaneada'}<br>Texto extraído: ${extractedText || 'Nenhum texto extraído'}<br>OP: ${op || 'Não encontrada'}<br>Data: ${data || 'Não encontrada'}`;
     }
   </script>
 </body>
